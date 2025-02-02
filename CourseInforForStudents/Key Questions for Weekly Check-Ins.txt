@@ -1,0 +1,13 @@
+﻿Weekly Progress Check-In Instructions:
+Please complete the following questions about your project progress. Keep your response concise, sticking to 1-2 sentences per question. Address each of the points below:
+1. How was the mentor meeting? Was there a good discussion/Did you get your questions answered/requests responded to?
+2. Do you have clear next steps?
+3. Do you and your teammates know exactly what you'll be doing this week?
+4. Any challenges or roadblocks?
+5. Any questions or feedback? 
+6. First meetings only: 
+   1. Is the project plan over the semester clear? (Describe in the zoom check-in)
+   2. What’s your current knowledge level on this project’s theme on a scale of 1-5? (1 being completely new to the topic)
+   3. Have you selected a caption? How are you discussing who’s learning or working on the different aspects and technologies of the project?
+   4. Have you set up the Github repository yet?
+   5. Are the mentors engaged and responsive?
