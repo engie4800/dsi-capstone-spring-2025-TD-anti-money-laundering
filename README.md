@@ -6,14 +6,12 @@ This course provides a unique opportunity for students in the MS in Data Science
 
 ## Team Structure
 
-Select a team captain (with or without help from mentor/instructor/supervisor)
-
-Record your names here in this format-
-1. Team captain name, UNI
-2. Member name, UNI
-3. Member name, UNI
-
-and so on.   
+1. Ernest Salim, es4281
+2. Sophie Wagner, sw3767
+3. Abhitay Shinde, aps2249
+4. Colin Payne-Rogers, cmp2250
+5. Jingyi (Zoe) Zou, jz3867
+6. Tanya Jia Xuan Lim, tjl2150
 
 ## Instructions
 
