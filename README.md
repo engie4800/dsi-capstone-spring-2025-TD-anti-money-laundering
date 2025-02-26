@@ -6,10 +6,10 @@ This course provides a unique opportunity for students in the MS in Data Science
 
 ## Team Structure
 
-1. Ernest Salim, es4281
-2. Sophie Wagner, sw3767
-3. Abhitay Shinde, aps2249
-4. Colin Payne-Rogers, cmp2250
+1. Sophie Wagner, sw3767 (Team Captain)
+2. Abhitay Shinde, aps2249
+3. Colin Payne-Rogers, cmp2250
+4. Ernest Salim, es4281
 5. Jingyi (Zoe) Zou, jz3867
 6. Tanya Jia Xuan Lim, tjl2150
 
