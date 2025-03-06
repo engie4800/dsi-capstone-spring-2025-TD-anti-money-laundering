@@ -8,6 +8,9 @@ HI-Large_Trans.csv
 LI-Large_Trans.csv
 SAML-D.csv
 
+# Other
+.DS_Store
+
 # The below is copied from the following for Python projects:
 #
 #   - <https://raw.githubusercontent.com/github/gitignore/refs/heads/main/Python.gitignore>
