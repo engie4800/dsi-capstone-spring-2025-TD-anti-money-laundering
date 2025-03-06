@@ -20,7 +20,7 @@ from sklearn.metrics import (
     roc_curve,
 )
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 from helpers.currency import get_usd_conversion
 
@@ -97,28 +97,12 @@ class ModelPipeline:
         self.df["is_weekend"] = self.df["day_of_week"].isin([5, 6]).astype(int)
         
         self.df.drop(columns=["Timestamp"], inplace= True)
-
-    def label_encoding(self, features_to_encode):
-        return self.apply_label_encoding(features_to_encode)
         
     def apply_label_encoding(self, categorical_features):
         """Label encode categorical columns"""
 
         for col in categorical_features:
             self.df[col] = LabelEncoder().fit_transform(self.df[col])
-
-    def neighbor_context(self):
-        G = nx.DiGraph()
-
-        for _, row in self.df.iterrows():
-            G.add_edge(row["Account"], row["Account.1"], weight=row["Amount Paid (USD)"])
-
-        self.df["degree_centrality"] = self.df["Account"].map(nx.degree_centrality(G))
-        self.df["pagerank"] = self.df["Account"].map(nx.pagerank(G))
-    
-    def split_x_y(self, X_cols, y_col):
-        self.X = self.df[X_cols]
-        self.y = self.df[y_col]
     
     def numerical_scaling(self, numerical_features):
         """Standardize Numerical Features"""
@@ -142,17 +126,6 @@ class ModelPipeline:
         self.df["degree_centrality"] = self.df["Account"].map(nx.degree_centrality(G))
         self.df["pagerank"] = self.df["Account"].map(nx.pagerank(G))
 
-    def generate_tensor(self,edge_features):
-        self.train_node_features = torch.tensor(self.X_train[edge_features].values, dtype=torch.float)
-        labels = torch.tensor(self.y_train.values, dtype=torch.long)
-        edge_index = torch.tensor(self.X_train[["Account", "Account.1"]].values.T, dtype=torch.long)
-        self.train_data = Data(x=self.train_node_features, edge_index=edge_index, y=labels)
-
-        self.test_node_features = torch.tensor(self.X_test[edge_features].values, dtype=torch.float)
-        labels = torch.tensor(self.y_test.values, dtype=torch.long)
-        edge_index = torch.tensor(self.X_test[["Account", "Account.1"]].values.T, dtype=torch.long)
-        self.test_data = Data(x=self.test_node_features, edge_index=edge_index, y=labels)
-
     def generate_tensors(self, edge_features, edges = ["Account", "Account.1"]):
         """Convert data to PyTorch tensor format for GNNs"""
 
@@ -172,87 +145,6 @@ class ModelPipeline:
 
         return self.train_data, self.val_data, self.test_data
 
-    def split_train_test(self, test_size: float) -> None:
-        """
-        Use the model pipeline `random_state` and the given `test_size`
-        to create a train, test split of the data and attach it to the
-        model pipeline
-        """
-        test_size = float(test_size)
-        if test_size < 0 or test_size > 1:
-            raise ValueError(
-                "Input 'test_size' represents a percentage as a 'float' "
-                f"between 0 and 1, inclusive. Invalid input: {test_size}"
-            )
-
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
-            self.X,
-            self.y,
-            test_size=test_size,
-            random_state=self.random_state,
-            stratify=self.y,
-        )
-
-    def split_train_test_v2(self, X_cols, y_col, test_size=0.2):
-        """Perform Train-Test Split"""
-
-        X = self.df[X_cols]
-        y = self.df[y_col]
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42, stratify=y
-        )
-
-        return self.X_train, self.X_test, self.y_train, self.y_test
-    
-    def random_forest_classifier(self, param):      
-        self.model = RandomForestClassifier(**param)
-        self.model.fit(self.X_train, self.y_train)
-
-    def xgboost_classifier(self,param):
-        self.dtrain = xgb.DMatrix(self.X_train, label=self.y_train)
-        self.dtest = xgb.DMatrix(self.X_test, label=self.y_test)
-        self.model = xgb.train(param, self.dtrain)
-
-    def training_gnn_model(self, learning_rate, epoch_, gnn_model):
-            
-        self.model = globals()[gnn_model](input_dim=self.train_node_features.shape[1], hidden_dim=16, output_dim=2)
-
-        # Define optimizer and loss function
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
-        criterion = nn.CrossEntropyLoss()
-
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = self.model.to(device)
-        self.train_data = self.train_data.to(device)
-
-        # Training loop
-        epochs = epoch_
-        for epoch in range(epochs):
-            self.model.train()
-            optimizer.zero_grad()
-            out = self.model(self.train_data.x, self.train_data.edge_index)
-            loss = criterion(out, self.train_data.y)
-            loss.backward()
-            optimizer.step()
-            
-            if epoch % 10 == 0:
-                print(f"Epoch {epoch} - Loss: {loss.item():.4f}")
-
-    def predict_model_gnn(self):
-        self.model.eval()
-        with torch.no_grad():
-            out_probs = self.model(self.test_data.x, self.test_data.edge_index)
-            self.y_proba = out_probs.cpu().numpy()
-            self.y_pred = out_probs.argmax(dim=1).cpu().numpy()
-
-    def predict_model(self, xgboost_flag = "null"):
-        if xgboost_flag == "null":
-            self.y_pred = self.model.predict(self.X_test)
-            self.y_proba = self.model.predict_proba(self.X_test)
-        else:
-            self.y_proba = self.model.predict(self.dtest)
-            self.y_pred = (self.y_proba > 0.5).astype(int)
-
     def split_train_test_val(self, X_cols, y_col, test_size=0.15, val_size=0.15):
         """Perform Train-Test-Validation Split"""
 
@@ -267,86 +159,6 @@ class ModelPipeline:
         )
         
         return self.X_train, self.X_val, self.X_test, self.y_train, self.y_val, self.y_test
-
-    def result_metrics_train_test_split(self, y_test, y_pred, y_proba=None, class_labels=None):
-        """
-        Compute and display model performance metrics.
-
-        Parameters:
-        - y_test: True labels
-        - y_pred: Predicted labels
-        - y_proba: Predicted probabilities (for AUC-ROC & PR curve)
-        - class_labels: List of class names (default: inferred from y_test)
-
-        Returns:
-        - metrics_dict: Dictionary containing key evaluation metrics
-        """
-
-        print("Classification Report:")
-        print(classification_report(y_test, y_pred, digits=4))
-
-        # Confusion Matrix
-        cm = confusion_matrix(y_test, y_pred)
-        accuracy = balanced_accuracy_score(y_test, y_pred)
-        mcc = matthews_corrcoef(y_test, y_pred)
-        logloss = log_loss(y_test, y_proba) if y_proba is not None else None
-
-        print(f"Balanced Accuracy: {accuracy:.4f}")
-        print(f"Matthews Correlation Coefficient (MCC): {mcc:.4f}")
-        if logloss:
-            print(f"Log Loss: {logloss:.4f}")
-
-        # If class labels are not provided, generate default ones
-        if class_labels is None:
-            class_labels = [f"Class {i}" for i in range(len(set(y_test)))]
-
-        # If probability predictions exist, compute ROC & PR AUC
-        if y_proba is not None:
-            # Binary classification
-            if len(y_proba.shape) == 1:
-                fpr, tpr, _ = roc_curve(y_test, y_proba)
-                roc_auc = roc_auc_score(y_test, y_proba)
-                precision, recall, _ = precision_recall_curve(y_test, y_proba)
-                pr_auc = auc(recall, precision)
-            else:  # Multi-class case
-                fpr, tpr, _ = roc_curve(y_test, y_proba[:, 1])
-                roc_auc = roc_auc_score(y_test, y_proba[:, 1])
-                precision, recall, _ = precision_recall_curve(y_test, y_proba[:, 1])
-                pr_auc = auc(recall, precision)
-
-
-            print(f"AUC-ROC Score: {roc_auc:.4f}")
-            print(f"Precision-Recall AUC: {pr_auc:.4f}")
-
-        # Visualization
-        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-
-        # Confusion Matrix Plot
-        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=axes[0])
-        axes[0].set_title("Confusion Matrix")
-        axes[0].set_xlabel("Predicted Label")
-        axes[0].set_ylabel("True Label")
-        axes[0].set_xticklabels(class_labels)
-        axes[0].set_yticklabels(class_labels)
-
-        # ROC Curve Plot
-        if y_proba is not None:
-            axes[1].plot(fpr, tpr, label=f"ROC AUC = {roc_auc:.4f}")
-            axes[1].plot([0, 1], [0, 1], linestyle="--", color="gray")  # Baseline
-            axes[1].set_title("ROC Curve")
-            axes[1].set_xlabel("False Positive Rate")
-            axes[1].set_ylabel("True Positive Rate")
-            axes[1].legend()
-
-            # Precision-Recall Curve
-            axes[2].plot(recall, precision, label=f"PR AUC = {pr_auc:.4f}")
-            axes[2].set_title("Precision-Recall Curve")
-            axes[2].set_xlabel("Recall")
-            axes[2].set_ylabel("Precision")
-            axes[2].legend()
-
-        plt.tight_layout()
-        plt.show()
 
     def result_metrics(self, slide_title, y_train, y_train_pred, y_train_proba,
                        y_val, y_val_pred, y_val_proba,
