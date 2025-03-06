@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import xgboost as xgb
 from IPython.display import display
+from rich import print
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (
     auc,
