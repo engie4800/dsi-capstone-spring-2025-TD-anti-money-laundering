@@ -40,6 +40,10 @@ class ModelPipeline:
         print("\nFEATURE TYPE")
         display(self.df.info())
 
+    def y_statistics(self):
+        print("Normalized Value Count: ")
+        print(self.df["Is Laundering"].value_counts(normalize=True))
+
     def drop_duplicates(self):
         self.df["from_account_id"] = self.df["From Bank"].astype(str) + "_" + self.df["Account"].astype(str)
         self.df["to_account_id"] = self.df["To Bank"].astype(str) + "_" + self.df["Account.1"].astype(str)
@@ -48,10 +52,6 @@ class ModelPipeline:
         from_nodes = df["from_account_id"].drop_duplicates().reset_index(drop=True)
         to_nodes = df["to_account_id"].drop_duplicates().reset_index(drop=True)
         all_nodes = pd.concat([from_nodes, to_nodes]).drop_duplicates().reset_index(drop=True)
-
-    def y_statistics(self):
-        print("Normalized Value Count: ")
-        print(self.df["Is Laundering"].value_counts(normalize=True))
 
     def currency_normalization(self):
         usd_conversion = get_usd_conversion(self.dataset_path)
@@ -63,6 +63,9 @@ class ModelPipeline:
             lambda row: row["Amount Received"] * usd_conversion.get(row["Receiving Currency"], 1),
             axis=1,
         )
+
+    def date_to_unix(self):
+        self.df["Timestamp"] = pd.to_datetime(self.df["Timestamp"]).astype(int) / 10**9 
 
     def add_date_features(self, date_column="Timestamp"):
         """Extract date features"""
@@ -95,12 +98,8 @@ class ModelPipeline:
         
         self.df.drop(columns=["Timestamp"], inplace= True)
 
-    def date_to_unix(self):
-        self.df["Timestamp"] = pd.to_datetime(self.df["Timestamp"]).astype(int) / 10**9 
-
     def label_encoding(self, features_to_encode):
-        for col in features_to_encode:
-            self.df[col] = LabelEncoder().fit_transform(self.df[col])
+        return self.apply_label_encoding(features_to_encode)
         
     def apply_label_encoding(self, categorical_features):
         """Label encode categorical columns"""
@@ -116,17 +115,6 @@ class ModelPipeline:
 
         self.df["degree_centrality"] = self.df["Account"].map(nx.degree_centrality(G))
         self.df["pagerank"] = self.df["Account"].map(nx.pagerank(G))
-
-    def generate_tensor(self,edge_features):
-        self.train_node_features = torch.tensor(self.X_train[edge_features].values, dtype=torch.float)
-        labels = torch.tensor(self.y_train.values, dtype=torch.long)
-        edge_index = torch.tensor(self.X_train[["Account", "Account.1"]].values.T, dtype=torch.long)
-        self.train_data = Data(x=self.train_node_features, edge_index=edge_index, y=labels)
-
-        self.test_node_features = torch.tensor(self.X_test[edge_features].values, dtype=torch.float)
-        labels = torch.tensor(self.y_test.values, dtype=torch.long)
-        edge_index = torch.tensor(self.X_test[["Account", "Account.1"]].values.T, dtype=torch.long)
-        self.test_data = Data(x=self.test_node_features, edge_index=edge_index, y=labels)
     
     def split_x_y(self, X_cols, y_col):
         self.X = self.df[X_cols]
@@ -153,6 +141,17 @@ class ModelPipeline:
         # Add centrality and pagerank as features
         self.df["degree_centrality"] = self.df["Account"].map(nx.degree_centrality(G))
         self.df["pagerank"] = self.df["Account"].map(nx.pagerank(G))
+
+    def generate_tensor(self,edge_features):
+        self.train_node_features = torch.tensor(self.X_train[edge_features].values, dtype=torch.float)
+        labels = torch.tensor(self.y_train.values, dtype=torch.long)
+        edge_index = torch.tensor(self.X_train[["Account", "Account.1"]].values.T, dtype=torch.long)
+        self.train_data = Data(x=self.train_node_features, edge_index=edge_index, y=labels)
+
+        self.test_node_features = torch.tensor(self.X_test[edge_features].values, dtype=torch.float)
+        labels = torch.tensor(self.y_test.values, dtype=torch.long)
+        edge_index = torch.tensor(self.X_test[["Account", "Account.1"]].values.T, dtype=torch.long)
+        self.test_data = Data(x=self.test_node_features, edge_index=edge_index, y=labels)
 
     def generate_tensors(self, edge_features, edges = ["Account", "Account.1"]):
         """Convert data to PyTorch tensor format for GNNs"""
@@ -213,7 +212,6 @@ class ModelPipeline:
         self.dtrain = xgb.DMatrix(self.X_train, label=self.y_train)
         self.dtest = xgb.DMatrix(self.X_test, label=self.y_test)
         self.model = xgb.train(param, self.dtrain)
-
 
     def training_gnn_model(self, learning_rate, epoch_, gnn_model):
             
