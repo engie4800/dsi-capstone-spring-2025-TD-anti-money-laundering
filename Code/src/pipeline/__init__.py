@@ -44,7 +44,6 @@ class ModelPipeline:
             "time_features_extracted": False,
             "cyclical_encoded": False,
             "weekend_encoded": False,
-            "date_converted": False,
             "features_encoded": False,
             "neighbor_context_computed": False,
             "normalized": False
@@ -132,13 +131,6 @@ class ModelPipeline:
             axis=1,
         )
         self.preprocessed["currency_normalized"] = True
-
-    def date_to_unix(self):
-        """Converts timestamp to Unix time."""
-        if "timestamp" not in self.df.columns:
-            raise KeyError("Missing 'timestamp' column.")
-        self.df["timestamp"] = self.df["timestamp"].astype(int) / 10**9
-        self.preprocessed["date_converted"] = True
 
     def extract_time_features(self):
         if "timestamp" not in self.df.columns:
@@ -248,9 +240,10 @@ class ModelPipeline:
             self.extract_time_features()
             self.cyclical_encoding()
             self.binary_weekend()
-            self.apply_label_encoding()
-            self.extract_graph_features()
+            # self.apply_label_encoding() need args
+            # self.extract_graph_features() need args
             print("Preprocessing completed successfully!")
+            print(self.preprocessed)
         except Exception as e:
             print(f"Error in preprocessing: {e}")
 
