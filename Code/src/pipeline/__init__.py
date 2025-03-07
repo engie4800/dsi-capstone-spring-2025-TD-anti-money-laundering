@@ -44,7 +44,6 @@ class ModelPipeline:
             "time_features_extracted": False,
             "cyclical_encoded": False,
             "weekend_encoded": False,
-            "date_converted": False,
             "features_encoded": False,
             "neighbor_context_computed": False,
             "normalized": False
@@ -131,13 +130,7 @@ class ModelPipeline:
             lambda row: row["received_amount"] * usd_conversion.get(row["received_currency"], 1),
             axis=1,
         )
-
-    def date_to_unix(self):
-        """Converts timestamp to Unix time."""
-        if "timestamp" not in self.df.columns:
-            raise KeyError("Missing 'timestamp' column.")
-        self.df["timestamp"] = self.df["timestamp"].astype(int) / 10**9
-        self.preprocessed["date_converted"] = True
+        self.preprocessed["currency_normalized"] = True
 
     def extract_time_features(self):
         if "timestamp" not in self.df.columns:
@@ -208,15 +201,15 @@ class ModelPipeline:
 
         G = nx.DiGraph()
         for _, row in self.df.iterrows():
-            G.add_edge(row["from_account"], row["to_account"], weight=row[weight_col])
+            G.add_edge(row["from_account_idx"], row["to_account_idx"], weight=row[weight_col])
 
         # Add centrality and pagerank as features
-        self.df["degree_centrality"] = self.df["from_account"].map(nx.degree_centrality(G))
-        self.df["pagerank"] = self.df["from_account"].map(nx.pagerank(G))
+        self.df["degree_centrality"] = self.df["from_account_idx"].map(nx.degree_centrality(G))
+        self.df["pagerank"] = self.df["from_account_idx"].map(nx.pagerank(G))
 
         self.preprocessed["neighbor_context_computed"] = True
 
-    def generate_tensors(self, edge_features, edges = ["from_account", "to_account"]):
+    def generate_tensors(self, edge_features, edges = ["from_account_idx", "to_account_idx"]):
         """Convert data to PyTorch tensor format for GNNs"""
 
         def create_pyg_data(X, y):
@@ -247,10 +240,10 @@ class ModelPipeline:
             self.extract_time_features()
             self.cyclical_encoding()
             self.binary_weekend()
-            self.date_to_unix()
-            self.apply_label_encoding()
-            self.extract_graph_features()
+            # self.apply_label_encoding() need args
+            # self.extract_graph_features() need args
             print("Preprocessing completed successfully!")
+            print(self.preprocessed)
         except Exception as e:
             print(f"Error in preprocessing: {e}")
 
