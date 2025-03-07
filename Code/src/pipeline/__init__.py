@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import networkx as nx
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import torch
@@ -7,20 +8,21 @@ import torch.nn as nn
 import xgboost as xgb
 from IPython.display import display
 from rich import print
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (
     auc,
     balanced_accuracy_score,
-    classification_report,
     confusion_matrix,
     matthews_corrcoef,
     log_loss,
     precision_recall_curve,
+    precision_score,
+    recall_score,
     roc_auc_score,
     roc_curve,
 )
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+from torch_geometric.data import Data
 
 from helpers.currency import get_usd_conversion
 
@@ -69,7 +71,7 @@ class ModelPipeline:
 
     def add_date_features(self, date_column="Timestamp"):
         """Extract date features"""
-        
+
         self.df["Timestamp"] = pd.to_datetime(self.df["Timestamp"])
 
         self.df["time_of_day"] = self.df["Timestamp"].dt.time
@@ -86,7 +88,7 @@ class ModelPipeline:
 
         # Just a temp assignment, will be scaled later on
         self.df["timestamp_scaled"] = self.df["Timestamp"].astype(int) / 10**9
-        
+
         # Apply cyclical encoding
         self.df["day_sin"] = np.sin(2 * np.pi * self.df["day_of_week"] / 7)
         self.df["day_cos"] = np.cos(2 * np.pi * self.df["day_of_week"] / 7)
@@ -95,7 +97,7 @@ class ModelPipeline:
 
         # Create binary weekend indicator
         self.df["is_weekend"] = self.df["day_of_week"].isin([5, 6]).astype(int)
-        
+
         self.df.drop(columns=["Timestamp"], inplace= True)
         
     def apply_label_encoding(self, categorical_features):
