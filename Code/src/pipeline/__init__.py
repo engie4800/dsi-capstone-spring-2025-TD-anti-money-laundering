@@ -44,7 +44,6 @@ class ModelPipeline:
             "time_features_extracted": False,
             "cyclical_encoded": False,
             "weekend_encoded": False,
-            "features_encoded": False,
             "neighbor_context_computed": False,
             "normalized": False
         }
