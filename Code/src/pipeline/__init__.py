@@ -211,7 +211,7 @@ class ModelPipeline:
         for col in independent_cols:
             self.df[col] = LabelEncoder().fit_transform(self.df[col])
 
-        print(f"\tLabel encoding applied to columns: {categorical_features}\n")
+        print(f"  Label encoding applied to columns: {categorical_features}\n\n")
         self.preprocessed["label_encoded"] = True
     
     def numerical_scaling(self, numerical_features):
@@ -236,7 +236,7 @@ class ModelPipeline:
         # Default weight columns: sent_amount and received_amount
         if weight_cols is None:
             weight_cols = ["sent_amount", "received_amount"]
-            print(f"Using default weight columns: {weight_cols}")
+            print(f"  Using default weight columns: {weight_cols}")
 
         G = nx.DiGraph()
         for _, row in self.df.iterrows():
@@ -250,9 +250,9 @@ class ModelPipeline:
             pagerank = nx.pagerank(G, weight="weight")
             self.df[f"pagerank_{weight_col}"] = self.df["from_account_idx"].map(pagerank)
             
-        print(f"Graph features computed using: {weight_cols}")
-        print("Note, previously graph-based features were calculated using only `sent_amount` as edge weight (only based on outgoing transactions). Now both sent and received amounts are included by default.")
-        print(f"New feature columns added: {', '.join([f'degree_centrality_{col}' for col in weight_cols] + [f'pagerank_{col}' for col in weight_cols])}\n")
+        print(f"  Graph features computed using: {weight_cols}")
+        print("  **Note**, previously graph-based features were calculated using only `sent_amount` as edge weight (only based on outgoing transactions). Now both sent and received amounts are included by default.")
+        print(f"  New feature columns added: {', '.join([f'degree_centrality_{col}' for col in weight_cols] + [f'pagerank_{col}' for col in weight_cols])}\n\n")
 
         self.preprocessed["neighbor_context_computed"] = True
 
