@@ -93,6 +93,7 @@ class ModelPipeline:
 
     def create_unique_ids(self):
         """Create unique account - ID mapping."""
+        print("Creating unique ids...")
         if not self.preprocessed["renamed"]:
             raise RuntimeError("Columns must be renamed (run rename()) before creating unique IDs.")
 
@@ -115,6 +116,7 @@ class ModelPipeline:
         self.preprocessed["unique_ids_created"] = True
 
     def currency_normalization(self):
+        print("Normalizing currency...")
         if "sent_currency" not in self.df.columns or "received_currency" not in self.df.columns:
             raise KeyError(
                 "Currency columns missing. Need to run 'rename_columns' "
@@ -133,6 +135,7 @@ class ModelPipeline:
         self.preprocessed["currency_normalized"] = True
 
     def extract_time_features(self):
+        print("Extracting time features...")
         if "timestamp" not in self.df.columns:
             raise KeyError(
                 "Missing 'timestamp' column, were columns renamed properly?"
@@ -160,9 +163,11 @@ class ModelPipeline:
         self.preprocessed["time_features_extracted"] = True
         
     def cyclical_encoding(self):
+        print("Adding cyclical encoding to time feats...")
+        
         if not self.preprocessed["time_features_extracted"]:
             raise RuntimeError("Time features missing, run `extract_time_features` first.")
-
+        
         self.df["day_sin"] = np.sin(2 * np.pi * self.df["day_of_week"] / 7)
         self.df["day_cos"] = np.cos(2 * np.pi * self.df["day_of_week"] / 7)
         self.df["time_of_day_sin"] = np.sin(2 * np.pi * self.df["seconds_since_midnight"] / 86400)
@@ -178,7 +183,7 @@ class ModelPipeline:
         
     def apply_label_encoding(self, categorical_features=None):
         """Label encode categorical columns, handling related columns"""
-
+        print("Applying label encoding...")
         # Default columns for encoding
         default_categorical_features = ["payment_type", "day_of_week", "from_bank", "to_bank", "sent_currency", "received_currency"]
 
@@ -206,7 +211,7 @@ class ModelPipeline:
         for col in independent_cols:
             self.df[col] = LabelEncoder().fit_transform(self.df[col])
 
-        print(f"Label encoding applied to columns: {categorical_features}")
+        print(f"\tLabel encoding applied to columns: {categorical_features}")
         self.preprocessed["label_encoded"] = True
     
     def numerical_scaling(self, numerical_features):
@@ -222,6 +227,7 @@ class ModelPipeline:
 
     def extract_graph_features(self, weight_cols=None):
         """Generate graph-based neighborhood context features"""
+        print("Extracting graph features...")
         if not self.preprocessed["unique_ids_created"]:
             raise RuntimeError(
                 "Unique account IDs must be created before computing network features"
@@ -244,15 +250,15 @@ class ModelPipeline:
             pagerank = nx.pagerank(G, weight="weight")
             self.df[f"pagerank_{weight_col}"] = self.df["from_account_idx"].map(pagerank)
             
-        print(f"Graph features computed using: {weight_cols}")
-        print("Note, previously graph-based features were calculated using only `sent_amount` as edge weight (only based on outgoing transactions). \nNow both sent and received amounts are included by default.")
-        print(f"New feature columns added: {', '.join([f'degree_centrality_{col}' for col in weight_cols] + [f'pagerank_{col}' for col in weight_cols])}")
+        print(f"\tGraph features computed using: {weight_cols}")
+        print("\tNote, previously graph-based features were calculated using only `sent_amount` as edge weight (only based on outgoing transactions). Now both sent and received amounts are included by default.")
+        print(f"\tNew feature columns added: {', '.join([f'degree_centrality_{col}' for col in weight_cols] + [f'pagerank_{col}' for col in weight_cols])}")
 
         self.preprocessed["neighbor_context_computed"] = True
 
     def generate_tensors(self, edge_features, node_features=None, edges = ["from_account_idx", "to_account_idx"]):
         """Convert data to PyTorch tensor format for GNNs"""
-
+        print("Generating tensors...")
         def create_pyg_data(X, y, dataset_name):
             
             edge_index = torch.tensor(X[edges].values.T, dtype=torch.long) # [2, num_edges]
@@ -281,9 +287,9 @@ class ModelPipeline:
             return data
 
         # Create PyTorch Geometric datasets for train, validation, and test
-        self.train_data = create_pyg_data(self.X_train, self.y_train)
-        self.val_data = create_pyg_data(self.X_val, self.y_val)
-        self.test_data = create_pyg_data(self.X_test, self.y_test)
+        self.train_data = create_pyg_data(self.X_train, self.y_train, "train")
+        self.val_data = create_pyg_data(self.X_val, self.y_val, "val")
+        self.test_data = create_pyg_data(self.X_test, self.y_test, "test")
         
         return self.train_data, self.val_data, self.test_data
     
@@ -306,19 +312,86 @@ class ModelPipeline:
         except Exception as e:
             print(f"Error in preprocessing: {e}")
 
-    def split_train_test_val(self, X_cols, y_col, test_size=0.15, val_size=0.15):
-        """Perform Train-Test-Validation Split"""
+    def split_train_test_val(self, X_cols, y_col, test_size=0.15, val_size=0.15, split_type="random_stratified"):
+        """Perform Train-Test-Validation Split
+           OPTIONS: ["random_stratified", "temporal", "temporal_agg"]
+           "random stratified": Data is randomized and split while keeping `is_laundering` label proportionate bt train/val/test.
+           "temporal": Data is sorted by timestamp, and split into df[:t1], df[t1:t2], df[t2:] 
+           "temporal_agg": Data is sorted by timestamp and split into df[:t1], df[:t2], df[:].
+                Note that in GNN, need to mask labels s.t. val only evaluates df[t1:t2] labels and test only evaluates df[t2:] labels.
+        """
+        valid_splits = ["random_stratified", "temporal", "temporal_agg"]
+        
+        if split_type is None: 
+            print("No split type entered; using default split_type: 'random_stratified'")
+            print("Valid split_type options:\n"
+                "- 'random_stratified' → Stratified random split maintaining label balance.\n"
+                "- 'temporal' → Sequential split based on timestamps.\n"
+                "- 'temporal_agg' → Aggregated sequential split (masking required in GNN evaluation).\n"
+                "See `split_train_test_val` for more details."
+            )
+            split_type = "random_stratified"
+            
+        elif split_type not in valid_splits:
+            raise ValueError(
+                f"Invalid split_type: '{split_type}'.\n"
+                f"Expected one of {valid_splits}.\n"
+                "Please choose a valid option:\n"
+                "- 'random_stratified' → Stratified random split maintaining label balance.\n"
+                "- 'temporal' → Sequential split based on timestamps.\n"
+                "- 'temporal_agg' → Aggregated sequential split with masking required in GNN evaluation.\n"
+                "See `split_train_test_val` for more details."
+            )
+            
+        self.split_type = split_type
 
         X = self.df[X_cols]
         y = self.df[y_col]
         
-        self.X_train, X_temp, self.y_train, y_temp = train_test_split(
-            X, y, test_size=(test_size + val_size), random_state=42, stratify=y
-        )
-        self.X_val, self.X_test, self.y_val, self.y_test = train_test_split(
-            X_temp, y_temp, test_size=test_size / (test_size + val_size), random_state=42, stratify=y_temp
-        )
+        if split_type == "random_stratified":
         
+            self.X_train, X_temp, self.y_train, y_temp = train_test_split(
+                X, y, test_size=(test_size + val_size), random_state=42, stratify=y
+            )
+            self.X_val, self.X_test, self.y_val, self.y_test = train_test_split(
+                X_temp, y_temp, test_size=test_size / (test_size + val_size), random_state=42, stratify=y_temp
+            )
+        
+        elif split_type == "temporal":
+            if "timestamp_int" not in self.df.columns:
+                raise RuntimeError("Need `timestamp_int` and `from_account_idx` in df for temporal split. Review preprocessing steps.")
+            
+            # Sort by time and find indices for data split
+            self.df = self.df.sort_values(by=["from_account_idx", "timestamp_int"])
+            t1 = (1-(test_size+val_size))*len(self.df).astype(int)
+            t2 = (1-test_size)*len(self.df).astype(int)
+            
+            # Split databased on timestamp
+            self.X_train, self.y_train = self.df[:t1][X_cols], self.df[:t1][y_col]
+            self.X_val, self.y_val = self.df[t1:t2][X_cols], self.df[t1:t2][y_col]
+            self.X_test, self.y_test = self.df[t2:][X_cols], self.tf[t2:][y_col]
+            
+        elif split_type == "temporal_agg":
+            if "timestamp_int" not in self.df.columns:
+                raise RuntimeError("Must include timestamp_int and from_account_idx in X_cols for temporal split")
+            
+            # Sort by time and find indices for data split
+            self.df = self.df.sort_values(by=["from_account_idx", "timestamp_int"])
+            t1 = (1-(test_size+val_size))*len(self.df).astype(int)
+            t2 = (1-test_size)*len(self.df).astype(int)
+            
+            # Temporal aggregated split (keeps earlier data but masks during GNN loss computation)
+            self.X_train, self.y_train = self.df[:t1][X_cols], self.df[:t1][y_col]
+            self.X_val, self.y_val = self.df[:t2][X_cols], self.df[:t2][y_col]
+            self.X_test, self.y_test = self.df[X_cols], self.tf[y_col]
+        
+        print("Data split using {split_type} method.")
+        if split_type == "temporal_agg":
+            print("Remember to mask labels in GNN evaluation.\n"
+                  " - Train: no mask \n"
+                  " - Val: mask y_lab[:t1] (only evaluate labels y_lab[t1:t2]) \n"
+                  " - Test: mask y_lab[:t2] (only evaluate labels y_lab[t2:])")
+            
         return self.X_train, self.X_val, self.X_test, self.y_train, self.y_val, self.y_test
 
     def result_metrics(self, slide_title, y_train, y_train_pred, y_train_proba,
