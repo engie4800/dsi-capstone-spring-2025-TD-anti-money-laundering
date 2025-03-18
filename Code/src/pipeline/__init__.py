@@ -44,6 +44,7 @@ class ModelPipeline:
             "time_features_extracted": False,
             "cyclical_encoded": False,
             "weekend_encoded": False,
+            "label_encoded": False,
             "neighbor_context_computed": False,
             "normalized": False
         }
@@ -175,10 +176,38 @@ class ModelPipeline:
         self.df["is_weekend"] = self.df["day_of_week"].isin([5, 6]).astype(int)
         self.preprocessed["weekend_encoded"] = True
         
-    def apply_label_encoding(self, categorical_features):
-        """Label encode categorical columns"""
+    def apply_label_encoding(self, categorical_features=None):
+        """Label encode categorical columns, handling related columns"""
+
+        # Default columns for encoding
+        default_categorical_features = ["payment_type", "day_of_week", "from_bank", "to_bank", "sent_currency", "received_currency"]
+
+        # Determine columns to encode
+        if categorical_features is None:
+            categorical_features = default_categorical_features
+
+        # Find related columns (e.g., "from_bank" and "to_bank" should use the same encoder)
+        column_groups = {}
         for col in categorical_features:
+            prefix, _, suffix = col.partition("_")
+            if suffix and any(other.endswith(f"_{suffix}") for other in categorical_features if other != col):
+                column_groups.setdefault(suffix, []).append(col)
+
+        # Apply encoding for related columns
+        for suffix, cols in column_groups.items():
+            encoder = LabelEncoder()
+            unique_values = pd.concat([self.df[col].drop_duplicates() for col in cols]).drop_duplicates().reset_index(drop=True)
+            encoder.fit(unique_values)
+            for col in cols:
+                self.df[col] = encoder.transform(self.df[col])
+
+        # Apply encoding for independent categorical columns
+        independent_cols = [col for col in categorical_features if col not in sum(column_groups.values(), [])]
+        for col in independent_cols:
             self.df[col] = LabelEncoder().fit_transform(self.df[col])
+
+        print(f"Label encoding applied to columns: {categorical_features}")
+        self.preprocessed["label_encoded"] = True
     
     def numerical_scaling(self, numerical_features):
         """Standardize Numerical Features"""
@@ -191,40 +220,71 @@ class ModelPipeline:
 
         return self.X_train, self.X_test, self.X_val
 
-    def extract_graph_features(self, weight_col):
+    def extract_graph_features(self, weight_cols=None):
         """Generate graph-based neighborhood context features"""
         if not self.preprocessed["unique_ids_created"]:
             raise RuntimeError(
                 "Unique account IDs must be created before computing network features"
             )
+      
+        # Default weight columns: sent_amount and received_amount
+        if weight_cols is None:
+            weight_cols = ["sent_amount", "received_amount"]
+            print(f"Using default weight columns: {weight_cols}")
 
         G = nx.DiGraph()
         for _, row in self.df.iterrows():
-            G.add_edge(row["from_account_idx"], row["to_account_idx"], weight=row[weight_col])
-
-        # Add centrality and pagerank as features
-        self.df["degree_centrality"] = self.df["from_account_idx"].map(nx.degree_centrality(G))
-        self.df["pagerank"] = self.df["from_account_idx"].map(nx.pagerank(G))
+            for weight_col in weight_cols:
+                G.add_edge(row["from_account_idx"], row["to_account_idx"], weight=row[weight_col])
+        
+        # Compute centrality and pagerank for each weight
+        for weight_col in weight_cols:
+            degree_centrality = nx.degree_centrality(G)
+            self.df[f"degree_centrality_{weight_col}"] = self.df["from_account_idx"].map(degree_centrality)
+            pagerank = nx.pagerank(G, weight="weight")
+            self.df[f"pagerank_{weight_col}"] = self.df["from_account_idx"].map(pagerank)
+            
+        print(f"Graph features computed using: {weight_cols}")
+        print("Note, previously graph-based features were calculated using only `sent_amount` as edge weight (only based on outgoing transactions). \nNow both sent and received amounts are included by default.")
+        print(f"New feature columns added: {', '.join([f'degree_centrality_{col}' for col in weight_cols] + [f'pagerank_{col}' for col in weight_cols])}")
 
         self.preprocessed["neighbor_context_computed"] = True
 
-    def generate_tensors(self, edge_features, edges = ["from_account_idx", "to_account_idx"]):
+    def generate_tensors(self, edge_features, node_features=None, edges = ["from_account_idx", "to_account_idx"]):
         """Convert data to PyTorch tensor format for GNNs"""
 
-        def create_pyg_data(X, y):
-            node_features = torch.tensor(X[edge_features].values, dtype=torch.float)
-
-            labels = torch.tensor(y.values, dtype=torch.long)
-
-            edge_index = torch.tensor(X[edges].values.T, dtype=torch.long)
+        def create_pyg_data(X, y, dataset_name):
             
-            return Data(x=node_features, edge_index=edge_index, y=labels)
+            edge_index = torch.tensor(X[edges].values.T, dtype=torch.long) # [2, num_edges]
+            edge_attr = torch.tensor(X[edge_features].values, dtype=torch.float) # [num_edges, num_edge_features]
+            edge_labels = torch.tensor(y.values, dtype=torch.long) # [num_edges]
+            num_nodes = edge_index.max().item() + 1
+            
+            # Handle node features if included (e.g. pagerank, bank account). 
+            if node_features:
+                node_attr = torch.tensor(X[node_features].values, dtype=torch.float) # [num_nodes, num_node_features]
+                node_feature_status = f"Using provided node features: {node_features}"
+            else:
+                note_attr = torch.ones((num_nodes, 1), dtype=torch.float)  # Default: ones tensor of shape [num_nodes, 1]
+                node_feature_status = "Using default node features (ones tensor)"
+            
+            data = Data(edge_index=edge_index, edge_attr=edge_attr, x=node_attr, y=edge_labels, num_nodes=num_nodes)
+
+            # Print tensor shapes
+            print(f"\nDataset: {dataset_name}")
+            print(f"  Edge Index Shape: {edge_index.shape} (should be [2, num_edges])")
+            print(f"  Edge Attribute Shape: {edge_attr.shape} (should be [num_edges, num_edge_features])")
+            print(f"  Node Attribute Shape: {node_attr.shape} (should be [num_nodes, num_node_features])")
+            print(f"  Edge Labels Shape: {edge_labels.shape} (should be [num_edges])")
+            print(f"  {node_feature_status}")
+            
+            return data
 
         # Create PyTorch Geometric datasets for train, validation, and test
         self.train_data = create_pyg_data(self.X_train, self.y_train)
         self.val_data = create_pyg_data(self.X_val, self.y_val)
         self.test_data = create_pyg_data(self.X_test, self.y_test)
-
+        
         return self.train_data, self.val_data, self.test_data
     
     def run_preprocessing(self):
@@ -239,8 +299,8 @@ class ModelPipeline:
             self.extract_time_features()
             self.cyclical_encoding()
             self.binary_weekend()
-            # self.apply_label_encoding() need args
-            # self.extract_graph_features() need args
+            self.apply_label_encoding()
+            self.extract_graph_features()
             print("Preprocessing completed successfully!")
             print(self.preprocessed)
         except Exception as e:
