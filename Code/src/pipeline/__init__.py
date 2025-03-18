@@ -211,7 +211,7 @@ class ModelPipeline:
         for col in independent_cols:
             self.df[col] = LabelEncoder().fit_transform(self.df[col])
 
-        print(f"  Label encoding applied to columns: {categorical_features}\n\n")
+        print(f"  Label encoding applied to columns: {categorical_features}\n")
         self.preprocessed["label_encoded"] = True
     
     def numerical_scaling(self, numerical_features):
@@ -252,7 +252,7 @@ class ModelPipeline:
             
         print(f"  Graph features computed using: {weight_cols}")
         print("  **Note**, previously graph-based features were calculated using only `sent_amount` as edge weight (only based on outgoing transactions). Now both sent and received amounts are included by default.")
-        print(f"  New feature columns added: {', '.join([f'degree_centrality_{col}' for col in weight_cols] + [f'pagerank_{col}' for col in weight_cols])}\n\n")
+        print(f"  New feature columns added: {', '.join([f'degree_centrality_{col}' for col in weight_cols] + [f'pagerank_{col}' for col in weight_cols])}\n")
 
         self.preprocessed["neighbor_context_computed"] = True
 
@@ -295,7 +295,7 @@ class ModelPipeline:
     
     def run_preprocessing(self):
         """Runs all preprocessing steps in the correct order."""
-        print("Running preprocessing pipeline...")
+        print("Running preprocessing pipeline...\n")
 
         try:
             self.rename_columns()
