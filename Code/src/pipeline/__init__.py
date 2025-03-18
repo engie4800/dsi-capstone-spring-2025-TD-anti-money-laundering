@@ -211,7 +211,7 @@ class ModelPipeline:
         for col in independent_cols:
             self.df[col] = LabelEncoder().fit_transform(self.df[col])
 
-        print(f"\tLabel encoding applied to columns: {categorical_features}")
+        print(f"\tLabel encoding applied to columns: {categorical_features}\n")
         self.preprocessed["label_encoded"] = True
     
     def numerical_scaling(self, numerical_features):
@@ -250,9 +250,9 @@ class ModelPipeline:
             pagerank = nx.pagerank(G, weight="weight")
             self.df[f"pagerank_{weight_col}"] = self.df["from_account_idx"].map(pagerank)
             
-        print(f"\tGraph features computed using: {weight_cols}")
-        print("\tNote, previously graph-based features were calculated using only `sent_amount` as edge weight (only based on outgoing transactions). Now both sent and received amounts are included by default.")
-        print(f"\tNew feature columns added: {', '.join([f'degree_centrality_{col}' for col in weight_cols] + [f'pagerank_{col}' for col in weight_cols])}")
+        print(f"Graph features computed using: {weight_cols}")
+        print("Note, previously graph-based features were calculated using only `sent_amount` as edge weight (only based on outgoing transactions). Now both sent and received amounts are included by default.")
+        print(f"New feature columns added: {', '.join([f'degree_centrality_{col}' for col in weight_cols] + [f'pagerank_{col}' for col in weight_cols])}\n")
 
         self.preprocessed["neighbor_context_computed"] = True
 
@@ -344,11 +344,10 @@ class ModelPipeline:
             )
             
         self.split_type = split_type
-
-        X = self.df[X_cols]
-        y = self.df[y_col]
         
         if split_type == "random_stratified":
+            X = self.df[X_cols]
+            y = self.df[y_col]
         
             self.X_train, X_temp, self.y_train, y_temp = train_test_split(
                 X, y, test_size=(test_size + val_size), random_state=42, stratify=y
@@ -362,30 +361,35 @@ class ModelPipeline:
                 raise RuntimeError("Need `timestamp_int` and `from_account_idx` in df for temporal split. Review preprocessing steps.")
             
             # Sort by time and find indices for data split
-            self.df = self.df.sort_values(by=["from_account_idx", "timestamp_int"])
+            df_sorted = self.df.sort_values(by=["from_account_idx", "timestamp_int"])
+            X = df_sorted[X_cols]
+            y = df_sorted[y_col]
             t1 = (1-(test_size+val_size))*len(self.df).astype(int)
             t2 = (1-test_size)*len(self.df).astype(int)
             
             # Split databased on timestamp
-            self.X_train, self.y_train = self.df[:t1][X_cols], self.df[:t1][y_col]
-            self.X_val, self.y_val = self.df[t1:t2][X_cols], self.df[t1:t2][y_col]
-            self.X_test, self.y_test = self.df[t2:][X_cols], self.tf[t2:][y_col]
+            self.X_train, self.y_train = X[:t1], y[:t1]
+            self.X_val, self.y_val = X[t1:t2], y[t1:t2]
+            self.X_test, self.y_test = X[t2:], y[t2:]
             
         elif split_type == "temporal_agg":
             if "timestamp_int" not in self.df.columns:
-                raise RuntimeError("Must include timestamp_int and from_account_idx in X_cols for temporal split")
+                raise RuntimeError("Must include timestamp_int and from_account_idx in df for temporal split")
             
             # Sort by time and find indices for data split
+            df_sorted = self.df.sort_values(by=["from_account_idx", "timestamp_int"])
+            X = df_sorted[X_cols]
+            y = df_sorted[y_col]
             self.df = self.df.sort_values(by=["from_account_idx", "timestamp_int"])
             t1 = (1-(test_size+val_size))*len(self.df).astype(int)
             t2 = (1-test_size)*len(self.df).astype(int)
             
             # Temporal aggregated split (keeps earlier data but masks during GNN loss computation)
-            self.X_train, self.y_train = self.df[:t1][X_cols], self.df[:t1][y_col]
-            self.X_val, self.y_val = self.df[:t2][X_cols], self.df[:t2][y_col]
-            self.X_test, self.y_test = self.df[X_cols], self.tf[y_col]
+            self.X_train, self.y_train = X[:t1], y[:t1]
+            self.X_val, self.y_val = X[:t2], y[:t2]
+            self.X_test, self.y_test = X[:], y[:]
         
-        print("Data split using {split_type} method.")
+        print(f"Data split using {split_type} method.")
         if split_type == "temporal_agg":
             print("Remember to mask labels in GNN evaluation.\n"
                   " - Train: no mask \n"
