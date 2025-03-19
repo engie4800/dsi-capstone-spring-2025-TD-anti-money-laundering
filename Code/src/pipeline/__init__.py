@@ -293,8 +293,10 @@ class ModelPipeline:
         
         return self.train_data, self.val_data, self.test_data
     
-    def run_preprocessing(self):
-        """Runs all preprocessing steps in the correct order."""
+    def run_preprocessing(self, graph_feats=True):
+        """Runs all preprocessing steps in the correct order.
+           Option to not include graph_feats calculation (takes long time)
+        """
         print("Running preprocessing pipeline...\n")
 
         try:
@@ -306,7 +308,8 @@ class ModelPipeline:
             self.cyclical_encoding()
             self.binary_weekend()
             self.apply_label_encoding()
-            self.extract_graph_features()
+            if graph_feats:
+                self.extract_graph_features()
             print("Preprocessing completed successfully!")
             print(self.preprocessed)
         except Exception as e:
@@ -364,8 +367,8 @@ class ModelPipeline:
             df_sorted = self.df.sort_values(by=["from_account_idx", "timestamp_int"])
             X = df_sorted[X_cols]
             y = df_sorted[y_col]
-            t1 = (1-(test_size+val_size))*len(self.df).astype(int)
-            t2 = (1-test_size)*len(self.df).astype(int)
+            t1 = int((1-(test_size+val_size))*len(self.df))
+            t2 = int((1-test_size)*len(self.df))
             
             # Split databased on timestamp
             self.X_train, self.y_train = X[:t1], y[:t1]
@@ -381,8 +384,8 @@ class ModelPipeline:
             X = df_sorted[X_cols]
             y = df_sorted[y_col]
             self.df = self.df.sort_values(by=["from_account_idx", "timestamp_int"])
-            t1 = (1-(test_size+val_size))*len(self.df).astype(int)
-            t2 = (1-test_size)*len(self.df).astype(int)
+            t1 = int((1-(test_size+val_size))*len(self.df))
+            t2 = int((1-test_size)*len(self.df))
             
             # Temporal aggregated split (keeps earlier data but masks during GNN loss computation)
             self.X_train, self.y_train = X[:t1], y[:t1]
