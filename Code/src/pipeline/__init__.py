@@ -267,12 +267,12 @@ class ModelPipeline:
             num_nodes = edge_index.max().item() + 1
             
             # Handle node features if included (e.g. pagerank, bank account). 
-            if node_features is None:
-                node_attr = torch.ones((num_nodes, 1), dtype=torch.float)  # Default: ones tensor of shape [num_nodes, 1]
-                node_feature_status = "Using default node features (ones tensor)"
-            else:
+            if node_features:
                 node_attr = torch.tensor(X[node_features].values, dtype=torch.float) # [num_nodes, num_node_features]
                 node_feature_status = f"Using provided node features: {node_features}"
+            else:
+                node_attr = torch.ones((num_nodes, 1), dtype=torch.float)  # Default: ones tensor of shape [num_nodes, 1]
+                node_feature_status = "Using default node features (ones tensor)"
             
             data = Data(edge_index=edge_index, edge_attr=edge_attr, x=node_attr, y=edge_labels, num_nodes=num_nodes)
 
