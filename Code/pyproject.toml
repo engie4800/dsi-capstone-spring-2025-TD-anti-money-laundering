@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "src"
+version = "0.1.0"
+description = "A brief description of your package"
+authors = [
+    { name = "Sophie Wagner", email = "sw3767@columbia.edu" },
+    { name = "Abhitay Shinde", email = "aps2249@columbia.edu" },
+    { name = "Colin Payne-Rogers", email = "cmp2250@columbia.edu" },
+    { name = "Ernest Salim", email = "es4281@columbia.edu" },
+    { name = "Jingyi (Zoe) Zou", email = "jz3867@columbia.edu" },
+    { name = "Tanya Jia Xuan Lim", email = "tjl2150@columbia.edu" },
+]
+requires-python = ">=3.9, <3.13"
+dependencies = [
+    # Jupyter
+    "IPython",
+    "jupyterlab",
+    "ipykernel",
+    "ipywidgets",
+    "nbformat",
+    "notebook",
+
+    # Data pipelining
+    "pandas",
+    "numpy",
+
+    # Machine learning
+    "networkx",
+    "scikit-learn",
+    "scikit-optimize",
+    "torch",
+    "torch_geometric",
+    "torchvision",
+    "xgboost",
+
+    # Data visualization
+    "matplotlib",
+    "seaborn",
+
+    # Miscellaneous
+    "rich",
+    "tabulate",
+]
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.setuptools.package-dir]
+mypackage = "Code/src"
