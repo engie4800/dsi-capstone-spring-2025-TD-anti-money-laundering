@@ -1,4 +1,11 @@
-### Patterns Deep Dive Bone Picking
+### File Directory
+
+1. Benchmark -> most basic worklflow (unused)
+2. Isaac's -> recreation of the other repository that the client shared (not the IBM Multi-GNN)
+3. GIN -> updated Sophie's notebook on using GIN
+4. Patterns -> visualizer for several money laundering patterns
+
+### Patterns Deep Dive
 
 #### Annoying accounts with multiple laundering patterns
 
