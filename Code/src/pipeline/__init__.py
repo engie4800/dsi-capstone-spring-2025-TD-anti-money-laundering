@@ -226,7 +226,7 @@ class ModelPipeline:
 
         return self.X_train, self.X_test, self.X_val
 
-    def extract_graph_features(self, weight_cols):
+    def add_graph_related_features(self, weight_cols):
         """Generate graph-based neighborhood context features"""
         print("Extracting graph features...")
 
