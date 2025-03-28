@@ -370,10 +370,10 @@ class ModelPipeline:
         
         elif split_type == "temporal":
             if "timestamp_int" not in self.df.columns:
-                raise RuntimeError("Need `timestamp_int` and `from_account_idx` in df for temporal split. Review preprocessing steps.")
+                raise RuntimeError("Need `timestamp_int` in df for temporal split. Review preprocessing steps.")
             
             # Sort by time and find indices for data split
-            df_sorted = self.df.sort_values(by=["from_account_idx", "timestamp_int"])
+            df_sorted = self.df.sort_values(by=["timestamp_int"])
             X = df_sorted[X_cols]
             y = df_sorted[y_col]
             t1 = int((1-(test_size+val_size))*len(self.df))
@@ -386,13 +386,13 @@ class ModelPipeline:
             
         elif split_type == "temporal_agg":
             if "timestamp_int" not in self.df.columns:
-                raise RuntimeError("Must include timestamp_int and from_account_idx in df for temporal split")
+                raise RuntimeError("Must include timestamp_int in df for temporal split")
             
             # Sort by time and find indices for data split
-            df_sorted = self.df.sort_values(by=["from_account_idx", "timestamp_int"])
+            df_sorted = self.df.sort_values(by=["timestamp_int"])
             X = df_sorted[X_cols]
             y = df_sorted[y_col]
-            self.df = self.df.sort_values(by=["from_account_idx", "timestamp_int"])
+            self.df = self.df.sort_values(by=["timestamp_int"])
             t1 = int((1-(test_size+val_size))*len(self.df))
             t2 = int((1-test_size)*len(self.df))
             
