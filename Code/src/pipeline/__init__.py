@@ -34,6 +34,7 @@ class ModelPipeline:
         """
         self.dataset_path = dataset_path
         self.df = pd.read_csv(self.dataset_path)
+        self.nodes = pd.DataFrame()
 
         # Track if preprocessing steps have been completed
         self.preprocessed = {
@@ -45,7 +46,7 @@ class ModelPipeline:
             "cyclical_encoded": False,
             "weekend_encoded": False,
             "label_encoded": False,
-            "neighbor_context_computed": False,
+            # "neighbor_context_computed": False,
             "normalized": False
         }
 
@@ -225,56 +226,64 @@ class ModelPipeline:
 
         return self.X_train, self.X_test, self.X_val
 
-    def extract_graph_features(self, weight_cols=None):
+    def extract_graph_features(self, weight_cols):
         """Generate graph-based neighborhood context features"""
         print("Extracting graph features...")
-        if not self.preprocessed["unique_ids_created"]:
-            raise RuntimeError(
-                "Unique account IDs must be created before computing network features"
-            )
-      
-        # Default weight columns: sent_amount and received_amount
-        if weight_cols is None:
-            weight_cols = ["sent_amount", "received_amount"]
-            print(f"  Using default weight columns: {weight_cols}")
 
+        # Bulding the graph from edges data
         G = nx.DiGraph()
         for _, row in self.df.iterrows():
             for weight_col in weight_cols:
                 G.add_edge(row["from_account_idx"], row["to_account_idx"], weight=row[weight_col])
         
-        # Compute centrality and pagerank for each weight
+        # Compute centrality and pagerank for each node
         for weight_col in weight_cols:
             degree_centrality = nx.degree_centrality(G)
-            self.df[f"degree_centrality_{weight_col}"] = self.df["from_account_idx"].map(degree_centrality)
+            self.nodes[f"degree_centrality_{weight_col}"] = self.nodes["node_id"].map(degree_centrality)
+
             pagerank = nx.pagerank(G, weight="weight")
-            self.df[f"pagerank_{weight_col}"] = self.df["from_account_idx"].map(pagerank)
+            self.nodes[f"pagerank_{weight_col}"] = self.nodes["node_id"].map(pagerank)
             
         print(f"  Graph features computed using: {weight_cols}")
         print("  **Note**, previously graph-based features were calculated using only `sent_amount` as edge weight (only based on outgoing transactions). Now both sent and received amounts are included by default.")
         print(f"  New feature columns added: {', '.join([f'degree_centrality_{col}' for col in weight_cols] + [f'pagerank_{col}' for col in weight_cols])}\n")
 
-        self.preprocessed["neighbor_context_computed"] = True
+    def extract_nodes(self, node_features=None, add_graph_features=True, graph_weighting_cols=["sent_amount", "received_amount"]):
+        """Extract nodes (x) data that is used across splits"""
+        
+        # Ensure that unique_ids have been generated
+        if not self.preprocessed["unique_ids_created"]:
+            raise RuntimeError(
+                "Unique account IDs must be created before computing network features"
+            )
+
+        print("Extracting nodes...")
+
+        # Creating empty node dataframe
+        num_nodes = self.df[['from_account_idx', 'to_account_idx']].max().max() + 1
+        print(f"Creating a Data Frame containing {num_nodes} nodes")
+        self.nodes = pd.DataFrame({'node_id': np.arange(num_nodes)})
+
+        # Adding node features to the dataframe
+        # 1. Graph related features (e.g. pagerank, degree_centrality)
+        # 2. TODO: Aggregated node features (e.g. avg_received, avg_sent, mode_bank, etc)
+        if add_graph_features:
+            self.extract_graph_features(weight_cols=graph_weighting_cols)
+        else:
+            self.nodes['placeholder'] = 1
 
     def generate_tensors(self, edge_features, node_features=None, edges = ["from_account_idx", "to_account_idx"]):
         """Convert data to PyTorch tensor format for GNNs"""
         print("Generating tensors...")
+
         def create_pyg_data(X, y, dataset_name):
-            
-            edge_index = torch.tensor(X[edges].values.T, dtype=torch.long) # [2, num_edges]
+
+            edge_index = torch.LongTensor(X[edges].values.T) # [2, num_edges]
             edge_attr = torch.tensor(X[edge_features].values, dtype=torch.float) # [num_edges, num_edge_features]
-            edge_labels = torch.tensor(y.values, dtype=torch.long) # [num_edges]
-            num_nodes = edge_index.max().item() + 1
+            edge_labels = torch.LongTensor(y.values) # [num_edges]
+            node_attr = torch.tensor(self.nodes.drop(columns='node_id').values, dtype=torch.float) # [num_nodes, num_node_features]
             
-            # Handle node features if included (e.g. pagerank, bank account). 
-            if node_features:
-                node_attr = torch.tensor(X[node_features].values, dtype=torch.float) # [num_nodes, num_node_features]
-                node_feature_status = f"Using provided node features: {node_features}"
-            else:
-                node_attr = torch.ones((num_nodes, 1), dtype=torch.float)  # Default: ones tensor of shape [num_nodes, 1]
-                node_feature_status = "Using default node features (ones tensor)"
-            
-            data = Data(edge_index=edge_index, edge_attr=edge_attr, x=node_attr, y=edge_labels, num_nodes=num_nodes)
+            data = Data(edge_index=edge_index, edge_attr=edge_attr, x=node_attr, y=edge_labels)
 
             # Print tensor shapes
             print(f"\nDataset: {dataset_name}")
@@ -282,7 +291,6 @@ class ModelPipeline:
             print(f"  Edge Attribute Shape: {edge_attr.shape} (should be [num_edges, num_edge_features])")
             print(f"  Node Attribute Shape: {node_attr.shape} (should be [num_nodes, num_node_features])")
             print(f"  Edge Labels Shape: {edge_labels.shape} (should be [num_edges])")
-            print(f"  {node_feature_status}")
             
             return data
 
@@ -290,10 +298,11 @@ class ModelPipeline:
         self.train_data = create_pyg_data(self.X_train, self.y_train, "train")
         self.val_data = create_pyg_data(self.X_val, self.y_val, "val")
         self.test_data = create_pyg_data(self.X_test, self.y_test, "test")
-        
+
         return self.train_data, self.val_data, self.test_data
+
     
-    def run_preprocessing(self, graph_feats=True):
+    def run_preprocessing(self):
         """Runs all preprocessing steps in the correct order.
            Option to not include graph_feats calculation (takes long time)
         """
@@ -308,10 +317,10 @@ class ModelPipeline:
             self.cyclical_encoding()
             self.binary_weekend()
             self.apply_label_encoding()
-            if graph_feats:
-                self.extract_graph_features()
+
             print("Preprocessing completed successfully!")
             print(self.preprocessed)
+            
         except Exception as e:
             print(f"Error in preprocessing: {e}")
 
