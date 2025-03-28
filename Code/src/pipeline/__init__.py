@@ -228,7 +228,7 @@ class ModelPipeline:
 
     def add_graph_related_features(self, weight_cols):
         """Generate graph-based neighborhood context features"""
-        print("Extracting graph features...")
+        print("Adding graph related features...")
 
         # Bulding the graph from edges data
         G = nx.DiGraph()
@@ -249,8 +249,10 @@ class ModelPipeline:
         print(f"  New feature columns added: {', '.join([f'degree_centrality_{col}' for col in weight_cols] + [f'pagerank_{col}' for col in weight_cols])}\n")
 
     def add_node_features(self, node_features):
+        print("Adding node features...")
+
+        # Combining nodes and their respective features (source only, destination only, or both) into several dataframes
         all_nodes = []
-        
         for features, _, _, kind in node_features:
             if kind == 'source_agg':
                 temp = self.df[['from_account_idx', features[0]]].rename(columns={'from_account_idx': 'node_id'})
@@ -270,13 +272,14 @@ class ModelPipeline:
 
             all_nodes.append(temp)
 
+        # Merging all dataframes on their node_id
         temp_node_df = all_nodes[0]
         for i in all_nodes[1:]:
             temp_node_df = pd.merge(temp_node_df, i, on='node_id', how='outer')
 
+        # Aggregating and summarizing into one dataframe containing unique nodes
         agg_funcs = {}
         rename_map = {}
-
         for features, method, rename_col, _ in node_features:
             feature_name = features[0] if len(features) == 1 else features[2]
 
@@ -292,9 +295,10 @@ class ModelPipeline:
         temp_node_df = temp_node_df.groupby('node_id').agg(agg_funcs).reset_index()
         temp_node_df.rename(columns=rename_map, inplace=True)
 
+        # Adding the new features to the main nodes dataframe
         self.nodes = pd.merge(self.nodes, temp_node_df, on='node_id', how='outer')
 
-    def extract_nodes(self, node_features=None, graph_related_features=["sent_amount", "received_amount"]):
+    def extract_nodes(self, node_features=None, graph_related_features=None):
         """Extract nodes (x) data that is used across splits"""
         
         # Ensure that unique_ids have been generated
@@ -313,7 +317,7 @@ class ModelPipeline:
         # Adding node features to the dataframe
         # 1. Graph related features (e.g. pagerank, degree_centrality)
         # 2. Aggregated node features (e.g. avg_received, avg_sent, mode_bank, etc)
-        if len(graph_related_features) > 0:
+        if graph_related_features is not None:
             self.add_graph_related_features(graph_related_features)
         
         if node_features is not None:
