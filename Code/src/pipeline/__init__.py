@@ -271,7 +271,7 @@ class ModelPipeline:
                 node_attr = torch.tensor(X[node_features].values, dtype=torch.float) # [num_nodes, num_node_features]
                 node_feature_status = f"Using provided node features: {node_features}"
             else:
-                note_attr = torch.ones((num_nodes, 1), dtype=torch.float)  # Default: ones tensor of shape [num_nodes, 1]
+                node_attr = torch.ones((num_nodes, 1), dtype=torch.float)  # Default: ones tensor of shape [num_nodes, 1]
                 node_feature_status = "Using default node features (ones tensor)"
             
             data = Data(edge_index=edge_index, edge_attr=edge_attr, x=node_attr, y=edge_labels, num_nodes=num_nodes)
