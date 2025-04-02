@@ -20,7 +20,7 @@ from sklearn.metrics import (
     roc_curve,
 )
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
 from torch_geometric.data import Data
 
 from helpers.currency import get_usd_conversion
@@ -46,8 +46,9 @@ class ModelPipeline:
             "cyclical_encoded": False,
             "weekend_encoded": False,
             "label_encoded": False,
-            # "neighbor_context_computed": False,
-            "normalized": False
+            "neighbor_context_computed": False,
+            "normalized": False,
+            "onehot_encoded": False
         }
 
     def df_summary(self):
@@ -181,12 +182,62 @@ class ModelPipeline:
             raise KeyError("Day-of-week feature missing. Run `extract_time_features` first.")
         self.df["is_weekend"] = self.df["day_of_week"].isin([5, 6]).astype(int)
         self.preprocessed["weekend_encoded"] = True
+    
+    def apply_one_hot_encoding(self, onehot_categorical_features= None):
+        """One hot encode categorical columns, handling related columns"""
+        print("Applying one hot encoding...")
+        # Default columns for encoding
+        default_categorical_features = ["payment_type", "received_currency", "sent_currency"]
+
+        # Use provided or default
+        categorical_features = onehot_categorical_features or default_categorical_features
+
+        # Find related column groups (e.g., same suffix)
+        column_groups = {}
+        for col in categorical_features:
+            prefix, _, suffix = col.partition("_")
+            if suffix and any(other.endswith(f"_{suffix}") for other in categorical_features if other != col):
+                column_groups.setdefault(suffix, []).append(col)
+
+        # Track columns to drop and DataFrames to concat
+        columns_to_drop = []
+        encoded_dfs = []
+
+        # Encode grouped columns using shared encoder
+        for suffix, cols in column_groups.items():
+            encoder = OneHotEncoder(sparse=False, handle_unknown='ignore')
+            unique_values = pd.concat([self.df[col] for col in cols], axis=0).drop_duplicates().to_frame()
+            encoder.fit(unique_values)
+
+            for col in cols:
+                transformed = encoder.transform(self.df[[col]])
+                ohe_cols = [f"{col}_{cat}" for cat in encoder.categories_[0]]
+                encoded_df = pd.DataFrame(transformed, columns=ohe_cols, index=self.df.index)
+                encoded_dfs.append(encoded_df)
+                columns_to_drop.append(col)
+
+        # Encode independent columns
+        independent_cols = [col for col in categorical_features if col not in sum(column_groups.values(), [])]
+        for col in independent_cols:
+            encoder = OneHotEncoder(sparse=False, handle_unknown='ignore')
+            transformed = encoder.fit_transform(self.df[[col]])
+            ohe_cols = [f"{col}_{cat}" for cat in encoder.categories_[0]]
+            encoded_df = pd.DataFrame(transformed, columns=ohe_cols, index=self.df.index)
+            encoded_dfs.append(encoded_df)
+            columns_to_drop.append(col)
+
+        # Drop original and concat encoded
+        self.df.drop(columns=columns_to_drop, inplace=True)
+        self.df = pd.concat([self.df] + encoded_dfs, axis=1)
+
+        print(f"  One hot encoding applied to columns: {categorical_features}\n")
+        self.preprocessed["onehot_encoded"] = True
         
     def apply_label_encoding(self, categorical_features=None):
         """Label encode categorical columns, handling related columns"""
         print("Applying label encoding...")
         # Default columns for encoding
-        default_categorical_features = ["payment_type", "day_of_week", "from_bank", "to_bank", "sent_currency", "received_currency"]
+        default_categorical_features = ["day_of_week", "from_bank", "to_bank"]
 
         # Determine columns to encode
         if categorical_features is None:
@@ -302,7 +353,7 @@ class ModelPipeline:
         return self.train_data, self.val_data, self.test_data
 
     
-    def run_preprocessing(self):
+    def run_preprocessing(self, graph_feats=True):
         """Runs all preprocessing steps in the correct order.
            Option to not include graph_feats calculation (takes long time)
         """
@@ -317,7 +368,9 @@ class ModelPipeline:
             self.cyclical_encoding()
             self.binary_weekend()
             self.apply_label_encoding()
-
+            self.apply_one_hot_encoding()
+            if graph_feats:
+                self.extract_graph_features()
             print("Preprocessing completed successfully!")
             print(self.preprocessed)
             
