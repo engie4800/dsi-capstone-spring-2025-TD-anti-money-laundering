@@ -155,10 +155,10 @@ class ModelPipeline:
         )
 
         # Transform timestamp to raw int unix
-        self.df["timestamp_int"] = self.df["timestamp"].astype(int) / 10**9
+        self.df["timestamp_int"] = self.df["timestamp"].astype('int64') / 10**9
 
         # Just a temp assignment, will be scaled later on
-        self.df["timestamp_scaled"] = self.df["timestamp"].astype(int) / 10**9
+        self.df["timestamp_scaled"] = self.df["timestamp"].astype('int64') / 10**9
 
         self.df.drop(columns=["timestamp"], inplace= True)
         
@@ -205,7 +205,7 @@ class ModelPipeline:
 
         # Encode grouped columns using shared encoder
         for suffix, cols in column_groups.items():
-            encoder = OneHotEncoder(sparse=False, handle_unknown='ignore')
+            encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
             unique_values = pd.concat([self.df[col] for col in cols], axis=0).drop_duplicates().to_frame()
             encoder.fit(unique_values)
 
@@ -219,7 +219,7 @@ class ModelPipeline:
         # Encode independent columns
         independent_cols = [col for col in categorical_features if col not in sum(column_groups.values(), [])]
         for col in independent_cols:
-            encoder = OneHotEncoder(sparse=False, handle_unknown='ignore')
+            encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
             transformed = encoder.fit_transform(self.df[[col]])
             ohe_cols = [f"{col}_{cat}" for cat in encoder.categories_[0]]
             encoded_df = pd.DataFrame(transformed, columns=ohe_cols, index=self.df.index)
@@ -281,23 +281,37 @@ class ModelPipeline:
         """Generate graph-based neighborhood context features"""
         print("Extracting graph features...")
 
-        # Bulding the graph from edges data
-        G = nx.DiGraph()
-        for _, row in self.df.iterrows():
-            for weight_col in weight_cols:
-                G.add_edge(row["from_account_idx"], row["to_account_idx"], weight=row[weight_col])
+        # Aggregate multiple edges into one per (from, to) pair
+        # Otherwise DiGraph overwrites the information
+        aggregated_edges = (
+            self.df
+            .groupby(["from_account_idx", "to_account_idx"])[weight_cols]
+            .sum()
+            .reset_index()
+        )
         
-        # Compute centrality and pagerank for each node
+        # Bulding the graph from aggregated edges data
+        G = nx.DiGraph()
+        for _, row in aggregated_edges.iterrows():
+            G.add_edge(row["from_account_idx"], row["to_account_idx"], 
+                       **{col: row[col] for col in weight_cols})
+        
+        # Compute centrality 
+        degree_centrality = nx.degree_centrality(G)
+        in_deg_cent = {n: d / (len(G) - 1) for n, d in G.in_degree()}
+        out_deg_cent = {n: d / (len(G) - 1) for n, d in G.out_degree()}
+        self.nodes["degree_centrality"] = self.nodes["node_id"].map(degree_centrality)
+        self.nodes["in_degree_centrality"] = self.nodes["node_id"].map(in_deg_cent)
+        self.nodes["out_degree_centrality"] = self.nodes["node_id"].map(out_deg_cent)
+        
+        # Compute pagerank using both sent amount and received amount
         for weight_col in weight_cols:
-            degree_centrality = nx.degree_centrality(G)
-            self.nodes[f"degree_centrality_{weight_col}"] = self.nodes["node_id"].map(degree_centrality)
-
             pagerank = nx.pagerank(G, weight="weight")
             self.nodes[f"pagerank_{weight_col}"] = self.nodes["node_id"].map(pagerank)
             
         print(f"  Graph features computed using: {weight_cols}")
         print("  **Note**, previously graph-based features were calculated using only `sent_amount` as edge weight (only based on outgoing transactions). Now both sent and received amounts are included by default.")
-        print(f"  New feature columns added: {', '.join([f'degree_centrality_{col}' for col in weight_cols] + [f'pagerank_{col}' for col in weight_cols])}\n")
+        print(f"  New feature columns added: degree_centrality, in_degree_centrality, out_degree_centrality, {', '.join([f'pagerank_{col}' for col in weight_cols])}\n")
 
     def extract_nodes(self, node_features=None, add_graph_features=True, graph_weighting_cols=["sent_amount", "received_amount"]):
         """Extract nodes (x) data that is used across splits"""
