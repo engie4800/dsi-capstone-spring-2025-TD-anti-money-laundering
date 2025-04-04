@@ -277,9 +277,9 @@ class ModelPipeline:
 
         return self.X_train, self.X_test, self.X_val
 
-    def extract_graph_features(self, weight_cols):
+    def add_graph_related_features(self, weight_cols):
         """Generate graph-based neighborhood context features"""
-        print("Extracting graph features...")
+        print("Adding graph related features...")
 
         # Aggregate multiple edges into one per (from, to) pair
         # Otherwise DiGraph overwrites the information
@@ -313,7 +313,57 @@ class ModelPipeline:
         print("  **Note**, previously graph-based features were calculated using only `sent_amount` as edge weight (only based on outgoing transactions). Now both sent and received amounts are included by default.")
         print(f"  New feature columns added: degree_centrality, in_degree_centrality, out_degree_centrality, {', '.join([f'pagerank_{col}' for col in weight_cols])}\n")
 
-    def extract_nodes(self, node_features=None, add_graph_features=True, graph_weighting_cols=["sent_amount", "received_amount"]):
+    def add_node_features(self, node_features):
+        print("Adding node features...")
+
+        # Combining nodes and their respective features (source only, destination only, or both) into several dataframes
+        all_nodes = []
+        for features, _, _, kind in node_features:
+            if kind == 'source_agg':
+                temp = self.df[['from_account_idx', features[0]]].rename(columns={'from_account_idx': 'node_id'})
+            
+            elif kind == 'destination_agg':
+                temp = self.df[['to_account_idx', features[0]]].rename(columns={'to_account_idx': 'node_id'})
+
+            elif kind == 'merge_agg':
+                if len(features) == 1:
+                    temp_from = self.df[['from_account_idx', features[0]]].rename(columns={'from_account_idx': 'node_id'})
+                    temp_to = self.df[['to_account_idx', features[0]]].rename(columns={'to_account_idx': 'node_id'})
+                else:
+                    temp_from = self.df[['from_account_idx', features[0]]].rename(columns={'from_account_idx': 'node_id', features[0]: features[2]})
+                    temp_to = self.df[['to_account_idx', features[1]]].rename(columns={'to_account_idx': 'node_id', features[1]: features[2]})
+
+                temp = pd.concat([temp_from, temp_to])
+
+            all_nodes.append(temp)
+
+        # Merging all dataframes on their node_id
+        temp_node_df = all_nodes[0]
+        for i in all_nodes[1:]:
+            temp_node_df = pd.merge(temp_node_df, i, on='node_id', how='outer')
+
+        # Aggregating and summarizing into one dataframe containing unique nodes
+        agg_funcs = {}
+        rename_map = {}
+        for features, method, rename_col, _ in node_features:
+            feature_name = features[0] if len(features) == 1 else features[2]
+
+            if method == 'mean':
+                agg_funcs[feature_name] = 'mean'
+            elif method == 'first':
+                agg_funcs[feature_name] = 'first'
+            elif method == 'mode':
+                agg_funcs[feature_name] = lambda x: x.mode().iloc[0] if not x.mode().empty else None
+            
+            rename_map[feature_name] = rename_col
+
+        temp_node_df = temp_node_df.groupby('node_id').agg(agg_funcs).reset_index()
+        temp_node_df.rename(columns=rename_map, inplace=True)
+
+        # Adding the new features to the main nodes dataframe
+        self.nodes = pd.merge(self.nodes, temp_node_df, on='node_id', how='outer')
+
+    def extract_nodes(self, node_features=None, graph_related_features=None):
         """Extract nodes (x) data that is used across splits"""
         
         # Ensure that unique_ids have been generated
@@ -331,10 +381,14 @@ class ModelPipeline:
 
         # Adding node features to the dataframe
         # 1. Graph related features (e.g. pagerank, degree_centrality)
-        # 2. TODO: Aggregated node features (e.g. avg_received, avg_sent, mode_bank, etc)
-        if add_graph_features:
-            self.extract_graph_features(weight_cols=graph_weighting_cols)
-        else:
+        # 2. Aggregated node features (e.g. avg_received, avg_sent, mode_bank, etc)
+        if graph_related_features is not None:
+            self.add_graph_related_features(graph_related_features)
+        
+        if node_features is not None:
+            self.add_node_features(node_features)
+
+        if self.nodes.shape[1] == 1:
             self.nodes['placeholder'] = 1
 
     def generate_tensors(self, edge_features, node_features=None, edges = ["from_account_idx", "to_account_idx"]):
@@ -387,7 +441,7 @@ class ModelPipeline:
                 self.extract_graph_features()
             print("Preprocessing completed successfully!")
             print(self.preprocessed)
-            
+
         except Exception as e:
             print(f"Error in preprocessing: {e}")
 
