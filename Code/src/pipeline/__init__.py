@@ -596,10 +596,12 @@ class ModelPipeline:
                 list(
                     set(self.df.columns) - set([
                         "from_account",
+                        "from_account_id",
                         "from_account_idx",
                         "from_bank",
                         "is_laundering",
                         "to_account",
+                        "to_account_id",
                         "to_account_idx",
                         "to_bank",
                     ])
@@ -788,7 +790,20 @@ class ModelPipeline:
         # A default set of edge features that excludes some obvious
         # features we don't want
         if edge_features is None:
-            edge_features = self.X_cols  # TODO: any reason not to do this?
+            edge_features = self.X_cols
+            # edge_features = self.X_cols - set([
+            #     # TODO: any reason not to do this?
+            #     # NOTE: seeing if these features are incompatible by
+            #     # removing them (they weren't included in the gnn
+            #     # baseline notebook for some reason)
+            #     "day_of_week",
+            #     "hour_of_day",
+            #     "is_weekend",
+            #     "received_amount",
+            #     "seconds_since_midnight",
+            #     "sent_amount",
+            #     "timestamp_int",
+            # ])
 
         # Nodes
         tr_x = torch.tensor(self.train_nodes.drop(columns="node_id").values, dtype=torch.float)
