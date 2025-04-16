@@ -35,6 +35,7 @@ from torchmetrics.classification import (
 )
 from tqdm import tqdm
 
+from checks import Checker
 from helpers.currency import get_usd_conversion
 from model import GINe
 
@@ -135,13 +136,14 @@ class ModelPipeline:
             )
         self.preprocessed["checked_for_null_values"] = True
 
-    def currency_normalization(self):
+    def currency_normalization(self) -> None:
+        """
+        Adds sent and received amounts in USD to each transaction,
+        which shouldn't add information to the set of edge features,
+        but which can be used on aggregated node features
+        """
         logging.info("Normalizing currency...")
-        if "sent_currency" not in self.df.columns or "received_currency" not in self.df.columns:
-            raise KeyError(
-                "Currency columns missing. Need to run 'rename_columns' "
-                "preprocessing step first."
-            )
+        Checker.currency_columns_required()
 
         usd_conversion = get_usd_conversion(self.dataset_path)
         self.df["sent_amount_usd"] = self.df.apply(
