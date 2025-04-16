@@ -592,7 +592,19 @@ class ModelPipeline:
         # Allow `split_train_test_val` to default to using all columns
         # for the set of `X_cols`
         if X_cols is None:
-            X_cols = sorted(list(set(self.df.columns) - set("is_laundering")))
+            X_cols = sorted(
+                list(
+                    set(self.df.columns) - set([
+                        "from_account",
+                        "from_account_idx",
+                        "from_bank",
+                        "is_laundering",
+                        "to_account",
+                        "to_account_idx",
+                        "to_bank",
+                    ])
+                )
+            )
         logging.info("Using the following set of 'X_cols'")
         logging.info(X_cols)
 
@@ -775,15 +787,7 @@ class ModelPipeline:
         # A default set of edge features that excludes some obvious
         # features we don't want
         if edge_features is None:
-            edge_features = set(self.df.columns) - set(
-                "from_account",
-                "from_account_idx",
-                "from_bank",
-                "is_laundering",
-                "to_account",
-                "to_account_idx",
-                "to_bank",
-            )
+            edge_features = self.X_cols  # TODO: any reason not to do this?
 
         # Nodes
         tr_x = torch.tensor(self.train_nodes.drop(columns="node_id").values, dtype=torch.float)
