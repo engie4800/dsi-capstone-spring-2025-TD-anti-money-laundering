@@ -989,7 +989,10 @@ class ModelPipeline:
             pred = (prob > threshold).long()
 
             total_loss += loss_fn(logits, target.float()).item() * logits.size(0)
-            preds.append(pred); targets.append(target); probs.append(prob)
+
+            preds.append(pred)
+            targets.append(target)
+            probs.append(prob)
 
         preds = torch.cat(preds)
         targets = torch.cat(targets)
@@ -1020,7 +1023,11 @@ class ModelPipeline:
             train_loss = 0
             train_preds, train_targets, train_probs = [], [], []
 
-            acc_fn.reset(); prec_fn.reset(); rec_fn.reset(); f1_fn.reset(); pr_auc_fn.reset()
+            acc_fn.reset()
+            prec_fn.reset()
+            rec_fn.reset()
+            f1_fn.reset()
+            pr_auc_fn.reset()
 
             for batch in tqdm(self.train_loader, desc=f"Epoch {epoch+1} Training"):
                 self.optimizer.zero_grad()
@@ -1029,6 +1036,12 @@ class ModelPipeline:
                 seed_edge_ids = self.df.loc[global_seed_inds.cpu().numpy(), "edge_id"].values
                 edge_ids_in_batch = batch.edge_attr[:, 0].detach().cpu().numpy()
                 mask = torch.isin(torch.tensor(edge_ids_in_batch), torch.tensor(seed_edge_ids)).to(self.device)
+
+                # TODO: why do I need to do this? Getting a zero
+                # division error that suggests the batch does not
+                # contain any matching edges
+                if mask.sum() == 0:
+                    breakpoint()
 
                 batch_edge_attr = batch.edge_attr[:, 1:].clone()
                 batch = batch.to(self.device)
