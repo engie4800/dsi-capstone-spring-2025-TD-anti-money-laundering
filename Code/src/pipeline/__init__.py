@@ -946,7 +946,7 @@ class ModelPipeline:
         num_edge_features = self.train_data.edge_attr.shape[1]-1  # num edge feats - edge_id
         num_node_features = self.train_data.x.shape[1]
         self.model = GINe(n_node_feats=num_node_features, n_edge_feats=num_edge_features).to(self.device)
-        self.optimizer = Adam(model.parameters(), lr=0.005)
+        self.optimizer = Adam(self.model.parameters(), lr=0.005)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
             mode="max",            # maximize the metric (e.g., F1, PR AUC)
