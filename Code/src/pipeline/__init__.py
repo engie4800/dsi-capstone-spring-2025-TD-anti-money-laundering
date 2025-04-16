@@ -605,11 +605,12 @@ class ModelPipeline:
                     ])
                 )
             )
+        self.X_cols = X_cols
         logging.info("Using the following set of 'X_cols'")
-        logging.info(X_cols)
+        logging.info(self.X_cols)
 
         if self.split_type == "random_stratified":
-            X = self.df[X_cols]
+            X = self.df[self.X_cols]
             y = self.df[y_col]
 
             self.X_train, X_temp, self.y_train, y_temp = train_test_split(
@@ -625,7 +626,7 @@ class ModelPipeline:
 
             # Sort by time and find indices for data split
             df_sorted = self.df.sort_values(by=["timestamp_int"])
-            X = df_sorted[X_cols]
+            X = df_sorted[self.X_cols]
             y = df_sorted[y_col]
             t1 = int((1-(test_size+val_size))*len(self.df))
             t2 = int((1-test_size)*len(self.df))
@@ -643,7 +644,7 @@ class ModelPipeline:
                 raise RuntimeError("Must include edge_id in df for temporal split")
 
             # Sort by time and find indices for data split
-            X = self.df[X_cols]
+            X = self.df[self.X_cols]
             y = self.df[y_col]
             t1 = int((1-(test_size+val_size))*len(self.df))
             t2 = int((1-test_size)*len(self.df))
