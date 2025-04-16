@@ -143,7 +143,7 @@ class ModelPipeline:
         but which can be used on aggregated node features
         """
         logging.info("Normalizing currency...")
-        Checker.currency_columns_required()
+        Checker.currency_columns_required(self)
 
         usd_conversion = get_usd_conversion(self.dataset_path)
         self.df["sent_amount_usd"] = self.df.apply(
