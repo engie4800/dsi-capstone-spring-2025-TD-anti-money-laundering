@@ -20,3 +20,15 @@ class Checker:
             raise KeyError(
                 "Missing 'timestamp' column, were columns renamed properly?"
             )
+
+    def columns_were_renamed(pipeline: "ModelPipeline") -> None:
+        if not pipeline.preprocessed["renamed"]:
+            raise RuntimeError(
+                "This method must be run after renaming columns."
+            )
+
+    def time_features_were_extracted(pipeline: "ModelPipeline") -> None:
+         if not pipeline.preprocessed["time_features_extracted"]:
+            raise RuntimeError(
+                "This method must be run after extracting time features."
+            )

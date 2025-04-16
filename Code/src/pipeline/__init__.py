@@ -213,15 +213,8 @@ class ModelPipeline:
     def create_unique_ids(self):
         """Create unique account - ID mapping."""
         logging.info("Creating unique ids...")
-        if not self.preprocessed["renamed"]:
-            raise RuntimeError(
-                "Columns must be renamed before creating unique IDs."
-            )
-        if "timestamp_int" not in self.df.columns:
-            raise KeyError(
-                "Timestamp column missing. Need to run 'extract_time_features' "
-                "preprocessing step first."
-            )
+        Checker.columns_were_renamed(self)
+        Checker.time_features_were_extracted(self)
 
         # Sort transactions by timestamp first
         self.df = self.df.sort_values(by="timestamp_int").reset_index(drop=True)
