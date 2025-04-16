@@ -587,7 +587,7 @@ class ModelPipeline:
         # Allow `split_train_test_val` to default to using all columns
         # for the set of `X_cols`
         if X_cols is None:
-            X_cols = sorted(list(set(self.df.columns) - "is_laundering"))
+            X_cols = sorted(list(set(self.df.columns) - {"is_laundering"}))
         logging.info("Using the following set of 'X_cols'")
         logging.info(X_cols)
 
