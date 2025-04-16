@@ -507,7 +507,6 @@ class ModelPipeline:
         self.test_data = create_pyg_data(self.X_test, self.y_test, "test")
 
         return self.train_data, self.val_data, self.test_data
-
     
     def run_preprocessing(self, graph_feats=True):
         """Runs all preprocessing steps in the correct order.
@@ -537,15 +536,15 @@ class ModelPipeline:
 
     def split_train_test_val(self, X_cols, y_col, test_size=0.15, val_size=0.15, split_type="random_stratified"):
         """Perform Train-Test-Validation Split
-           OPTIONS: ["random_stratified", "temporal", "temporal_agg"]
-           "random stratified": Data is randomized and split while keeping `is_laundering` label proportionate bt train/val/test.
-           "temporal": Data is sorted by timestamp, and split into df[:t1], df[t1:t2], df[t2:] 
-           "temporal_agg": Data is sorted by timestamp and split into df[:t1], df[:t2], df[:].
+            OPTIONS: ["random_stratified", "temporal", "temporal_agg"]
+            "random stratified": Data is randomized and split while keeping `is_laundering` label proportionate bt train/val/test.
+            "temporal": Data is sorted by timestamp, and split into df[:t1], df[t1:t2], df[t2:]
+            "temporal_agg": Data is sorted by timestamp and split into df[:t1], df[:t2], df[:].
                 Note that in GNN, need to mask labels s.t. val only evaluates df[t1:t2] labels and test only evaluates df[t2:] labels.
         """
         valid_splits = ["random_stratified", "temporal", "temporal_agg"]
-        
-        if split_type is None: 
+
+        if split_type is None:
             logging.info("No split type entered; using default split_type: 'random_stratified'")
             logging.info("Valid split_type options:\n"
                 "- 'random_stratified' → Stratified random split maintaining label balance.\n"
@@ -554,7 +553,7 @@ class ModelPipeline:
                 "See `split_train_test_val` for more details."
             )
             split_type = "random_stratified"
-            
+
         elif split_type not in valid_splits:
             raise ValueError(
                 f"Invalid split_type: '{split_type}'.\n"
@@ -565,60 +564,61 @@ class ModelPipeline:
                 "- 'temporal_agg' → Aggregated sequential split with masking required in GNN evaluation.\n"
                 "See `split_train_test_val` for more details."
             )
-            
+
         self.split_type = split_type
-        
-        if split_type == "random_stratified":
+
+        if self.split_type == "random_stratified":
             X = self.df[X_cols]
             y = self.df[y_col]
-        
+
             self.X_train, X_temp, self.y_train, y_temp = train_test_split(
                 X, y, test_size=(test_size + val_size), random_state=42, stratify=y
             )
             self.X_val, self.X_test, self.y_val, self.y_test = train_test_split(
                 X_temp, y_temp, test_size=test_size / (test_size + val_size), random_state=42, stratify=y_temp
             )
-        
-        elif split_type == "temporal":
+
+        elif self.split_type == "temporal":
             if "timestamp_int" not in self.df.columns:
                 raise RuntimeError("Need `timestamp_int` in df for temporal split. Review preprocessing steps.")
-            
+
             # Sort by time and find indices for data split
             df_sorted = self.df.sort_values(by=["timestamp_int"])
             X = df_sorted[X_cols]
             y = df_sorted[y_col]
             t1 = int((1-(test_size+val_size))*len(self.df))
             t2 = int((1-test_size)*len(self.df))
-            
+
             # Split databased on timestamp
             self.X_train, self.y_train = X[:t1], y[:t1]
             self.X_val, self.y_val = X[t1:t2], y[t1:t2]
             self.X_test, self.y_test = X[t2:], y[t2:]
-            
-        elif split_type == "temporal_agg":
+
+        elif self.split_type == "temporal_agg":
             if "timestamp_int" not in self.df.columns:
                 raise RuntimeError("Must include timestamp_int in df for temporal split")
-            
+
+            if "edge_id" not in self.df.columns:
+                raise RuntimeError("Must include edge_id in df for temporal split")
+
             # Sort by time and find indices for data split
-            df_sorted = self.df.sort_values(by=["timestamp_int"])
-            X = df_sorted[X_cols]
-            y = df_sorted[y_col]
-            self.df = self.df.sort_values(by=["timestamp_int"])
+            X = self.df[X_cols]
+            y = self.df[y_col]
             t1 = int((1-(test_size+val_size))*len(self.df))
             t2 = int((1-test_size)*len(self.df))
-            
+
             # Temporal aggregated split (keeps earlier data but masks during GNN loss computation)
             self.X_train, self.y_train = X[:t1], y[:t1]
             self.X_val, self.y_val = X[:t2], y[:t2]
             self.X_test, self.y_test = X[:], y[:]
-        
-        logging.info(f"Data split using {split_type} method.")
-        if split_type == "temporal_agg":
+
+        logging.info(f"Data split using {self.split_type} method.")
+        if self.split_type == "temporal_agg":
             logging.info("Remember to mask labels in GNN evaluation.\n"
-                  " - Train: no mask \n"
-                  " - Val: mask y_lab[:t1] (only evaluate labels y_lab[t1:t2]) \n"
-                  " - Test: mask y_lab[:t2] (only evaluate labels y_lab[t2:])")
-            
+                " - Train: no mask \n"
+                " - Val: mask y_lab[:t1] (only evaluate labels y_lab[t1:t2]) \n"
+                " - Test: mask y_lab[:t2] (only evaluate labels y_lab[t2:])")
+
         return self.X_train, self.X_val, self.X_test, self.y_train, self.y_val, self.y_test
 
     def result_metrics(self, slide_title, y_train, y_train_pred, y_train_proba,
