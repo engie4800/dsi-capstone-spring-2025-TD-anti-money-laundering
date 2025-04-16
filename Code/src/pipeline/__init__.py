@@ -1037,12 +1037,6 @@ class ModelPipeline:
                 edge_ids_in_batch = batch.edge_attr[:, 0].detach().cpu().numpy()
                 mask = torch.isin(torch.tensor(edge_ids_in_batch), torch.tensor(seed_edge_ids)).to(self.device)
 
-                # TODO: why do I need to do this? Getting a zero
-                # division error that suggests the batch does not
-                # contain any matching edges
-                if mask.sum() == 0:
-                    breakpoint()
-
                 batch_edge_attr = batch.edge_attr[:, 1:].clone()
                 batch = batch.to(self.device)
                 logits = self.model(batch.x, batch.edge_index, batch_edge_attr).view(-1)[mask]
