@@ -42,6 +42,7 @@ class ModelPipeline:
             "duplicates_removed": False,
             "unique_ids_created": False,
             "currency_normalized": False,
+            "currency_features_extracted": False,
             "time_features_extracted": False,
             "cyclical_encoded": False,
             "weekend_encoded": False,
@@ -99,19 +100,31 @@ class ModelPipeline:
         if not self.preprocessed["renamed"]:
             raise RuntimeError("Columns must be renamed (run rename()) before creating unique IDs.")
 
+        # Sort transactions by timestamp first
+        self.df = self.df.sort_values(by='timestamp_int').reset_index(drop=True)
+        self.df['edge_id'] = self.df.index.astype(int)
+
         # Get unique account-bank combos (a couple of acct numbers found at multiple banks)
         self.df['from_account_id'] = self.df['from_bank'].astype(str) + '_' + self.df['from_account'].astype(str)
         self.df['to_account_id'] = self.df['to_bank'].astype(str) + '_' + self.df['to_account'].astype(str)
         self.df.drop(columns=["from_account", "to_account"], inplace=True)
 
-        # Get list of unique account ids
-        self.df = self.df.reset_index(drop=True)
-        from_nodes = self.df["from_account_id"].drop_duplicates().reset_index(drop=True)
-        to_nodes = self.df["to_account_id"].drop_duplicates().reset_index(drop=True)
-        all_nodes = pd.concat([from_nodes, to_nodes]).drop_duplicates().reset_index(drop=True)
+        # Combine all accounts in the order they appear, preserving timestamp order
+        accounts_ordered = pd.concat([
+            self.df[["edge_id", "from_account_id"]].rename(columns={"from_account_id": "account_id"}),
+            self.df[["edge_id", "to_account_id"]].rename(columns={"to_account_id": "account_id"})
+        ])
+
+        # Sort by timestamp to reflect temporal ordering
+        accounts_ordered = accounts_ordered.sort_values(by='edge_id')
+
+        # Drop duplicates to get first-seen ordering of accounts
+        unique_accounts = accounts_ordered.drop_duplicates(subset="account_id")["account_id"].reset_index(drop=True)
+
+        # Create mapping: account_id → index based on first appearance
+        node_mapping = {account: idx for idx, account in enumerate(unique_accounts)}
 
         # Map node identifiers to integer indices
-        node_mapping = {node: idx for idx, node in enumerate(all_nodes)}
         self.df["from_account_idx"] = self.df["from_account_id"].map(node_mapping)
         self.df["to_account_idx"] = self.df["to_account_id"].map(node_mapping)
 
@@ -135,6 +148,20 @@ class ModelPipeline:
             axis=1,
         )
         self.preprocessed["currency_normalized"] = True
+
+    def extract_currency_features(self):
+        print("Extracting currency features...")
+        if "sent_currency" not in self.df.columns or "received_currency" not in self.df.columns:
+            raise KeyError(
+                "Currency columns missing. Need to run 'rename_columns' "
+                "preprocessing step first."
+            )
+
+        self.df["currency_changed"] = (
+            self.df["sent_currency"] != self.df["received_currency"]
+        ).astype(int)
+
+        self.preprocessed["currency_features_extracted"] = True
 
     def extract_time_features(self):
         print("Extracting time features...")
