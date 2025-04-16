@@ -157,6 +157,13 @@ class ModelPipeline:
         self.preprocessed["currency_normalized"] = True
 
     def extract_currency_features(self) -> None:
+        """
+        Extract all currency-related features
+
+            currency_changed: Whether the money in the transaction
+                changes currency from sender to receiver
+
+        """
         logging.info("Extracting currency features...")
         Checker.currency_columns_required(self)
 
@@ -167,17 +174,26 @@ class ModelPipeline:
         self.preprocessed["currency_features_extracted"] = True
 
     def extract_time_features(self):
+        """
+        Extract initial time-related features
+
+            hour_of_day: The hour of day of the transaction
+            day_of_week: The day of week of the transaction
+            seconds_since_midnight: The number of seconds that have
+                passed since midnight on the day the transaction
+                occurred
+            timestamp_int: Integer representation of the timestamp
+
+        """
         logging.info("Extracting time features...")
-        if "timestamp" not in self.df.columns:
-            raise KeyError(
-                "Missing 'timestamp' column, were columns renamed properly?"
-            )
+        Checker.timestamp_required()
+
         if not isinstance(self.df["timestamp"], datetime.datetime):
             self.df["timestamp"] = pd.to_datetime(self.df["timestamp"])
 
         # Extract items from timestamp
         self.df["hour_of_day"] = self.df["timestamp"].dt.hour
-        self.df["day_of_week"] = self.df["timestamp"].dt.weekday # 0=Monday,...,6=Sunday
+        self.df["day_of_week"] = self.df["timestamp"].dt.weekday  # 0=Monday,...,6=Sunday
         self.df["seconds_since_midnight"] = (
             self.df["timestamp"].dt.hour * 3600 +  # Convert hours to seconds
             self.df["timestamp"].dt.minute * 60 +  # Convert minutes to seconds
