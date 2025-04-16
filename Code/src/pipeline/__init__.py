@@ -156,13 +156,9 @@ class ModelPipeline:
         )
         self.preprocessed["currency_normalized"] = True
 
-    def extract_currency_features(self):
+    def extract_currency_features(self) -> None:
         logging.info("Extracting currency features...")
-        if "sent_currency" not in self.df.columns or "received_currency" not in self.df.columns:
-            raise KeyError(
-                "Currency columns missing. Need to run 'rename_columns' "
-                "preprocessing step first."
-            )
+        Checker.currency_columns_required(self)
 
         self.df["currency_changed"] = (
             self.df["sent_currency"] != self.df["received_currency"]
