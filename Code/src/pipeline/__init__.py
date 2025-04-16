@@ -466,7 +466,7 @@ class ModelPipeline:
         # Creating empty node dataframe
         num_nodes = self.df[['from_account_idx', 'to_account_idx']].max().max() + 1
         logging.info(f"Creating a Data Frame containing {num_nodes} nodes")
-        self.nodes = pd.DataFrame({'node_id': np.arange(num_nodes)})
+        self.nodes = pd.DataFrame({"node_id": np.arange(num_nodes)})
 
         # Adding node features to the dataframe
         # 1. Graph related features (e.g. pagerank, degree_centrality)
@@ -478,7 +478,7 @@ class ModelPipeline:
             self.add_node_features(node_features)
 
         if self.nodes.shape[1] == 1:
-            self.nodes['placeholder'] = 1
+            self.nodes["placeholder"] = 1
 
     def generate_tensors(self, edge_features, node_features=None, edges = ["from_account_idx", "to_account_idx"]):
         """Convert data to PyTorch tensor format for GNNs"""
@@ -758,6 +758,62 @@ class ModelPipeline:
             split_edges=self.df.loc[self.train_val_test_indices, :],
             split_name="test",
             graph_features=graph_features
+        )
+
+    def split_train_test_val_graph(self, edge_features=None):
+        # TODO: can check that the previous train, test split has been
+        # completed before running this
+
+        # A default set of edge features that excludes some obvious
+        # features we don't want
+        if edge_features is None:
+            edge_features = set(self.df.columns) - set(
+                "from_account",
+                "from_account_idx",
+                "from_bank",
+                "is_laundering",
+                "to_account",
+                "to_account_idx",
+                "to_bank",
+            )
+
+        # Nodes
+        tr_x = torch.tensor(self.train_nodes.drop(columns="node_id").values, dtype=torch.float)
+        val_x = torch.tensor(self.val_nodes.drop(columns="node_id").values, dtype=torch.float)
+        te_x = torch.tensor(self.test_nodes.drop(columns="node_id").values, dtype=torch.float)
+
+        # Labels
+        self.y = torch.LongTensor(self.df["is_laundering"].to_numpy())
+
+        # Edge index
+        self.edge_index = torch.LongTensor(self.df[["from_account_idx", "to_account_idx"]].to_numpy().T)
+
+        # Edge attr
+        edge_attr = torch.tensor(self.df[edge_features].to_numpy(), dtype=torch.float)
+
+        t1 = torch.tensor(t1)
+        t2 = torch.tensor(t2)
+
+        # Overwrites the values we got from the original split
+        # TODO: Do we need to keep both?
+        self.train_indices = torch.tensor(self.train_indices)
+        self.val_indices = torch.tensor(self.val_indices)
+        self.test_indices = torch.tensor(self.test_indices)
+
+        cat_tr_val_inds = torch.cat((self.train_indices, self.val_indices))
+        self.train_data = Data(x=tr_x, edge_index=edge_index[:,self.train_indices], edge_attr=edge_attr[self.train_indices], y=y[self.train_indices])
+        self.val_data = Data(x=val_x, edge_index=edge_index[:,cat_tr_val_inds], edge_attr=edge_attr[cat_tr_val_inds], y=y[cat_tr_val_inds])
+        self.test_data = Data(x=te_x, edge_index=edge_index, edge_attr=edge_attr, y=y)
+
+        return (
+            self.train_indices,
+            self.val_indices,
+            self.test_indices,
+            self.train_data,
+            self.val_data,
+            self.test_data,
+            self.edge_index,
+            self.y,
         )
 
     def result_metrics(self, slide_title, y_train, y_train_pred, y_train_proba,
