@@ -54,6 +54,8 @@ class ModelPipeline:
             "normalized": False,
             "onehot_encoded": False,
             "train_test_val_data_split": False,
+            "post_split_node_features": False,
+            "train_test_val_data_split_graph": False,
         }
 
     def df_summary(self):
@@ -760,9 +762,15 @@ class ModelPipeline:
             graph_features=graph_features
         )
 
+        self.preprocessed["post_split_node_features"] = True
+
     def split_train_test_val_graph(self, edge_features=None):
-        # TODO: can check that the previous train, test split has been
-        # completed before running this
+        logging.info("Splitting into train, test, validation graphs")
+        if not self.preprocessed["post_split_node_features"]:
+            raise RuntimeError(
+                "Train, test, validation graph split assumes that post-"
+                "split node features have been added."
+            )
 
         # A default set of edge features that excludes some obvious
         # features we don't want
@@ -801,9 +809,26 @@ class ModelPipeline:
         self.test_indices = torch.tensor(self.test_indices)
 
         cat_tr_val_inds = torch.cat((self.train_indices, self.val_indices))
-        self.train_data = Data(x=tr_x, edge_index=edge_index[:,self.train_indices], edge_attr=edge_attr[self.train_indices], y=y[self.train_indices])
-        self.val_data = Data(x=val_x, edge_index=edge_index[:,cat_tr_val_inds], edge_attr=edge_attr[cat_tr_val_inds], y=y[cat_tr_val_inds])
-        self.test_data = Data(x=te_x, edge_index=edge_index, edge_attr=edge_attr, y=y)
+        self.train_data = Data(
+            x=tr_x,
+            edge_index=self.edge_index[:,self.train_indices],
+            edge_attr=edge_attr[self.train_indices],
+            y=self.y[self.train_indices],
+        )
+        self.val_data = Data(
+            x=val_x,
+            edge_index=self.edge_index[:,cat_tr_val_inds],
+            edge_attr=edge_attr[cat_tr_val_inds],
+            y=self.y[cat_tr_val_inds],
+        )
+        self.test_data = Data(
+            x=te_x,
+            edge_index=self.edge_index,
+            edge_attr=edge_attr,
+            y=self.y,
+        )
+
+        self.preprocessed["train_test_val_data_split_graph"] = True
 
         return (
             self.train_indices,
