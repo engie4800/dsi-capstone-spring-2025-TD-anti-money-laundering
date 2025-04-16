@@ -819,11 +819,11 @@ class ModelPipeline:
         # Edge attr
         edge_attr = torch.tensor(self.df[edge_features].to_numpy(), dtype=torch.float)
 
-        t1 = torch.tensor(t1)
-        t2 = torch.tensor(t2)
 
         # Overwrites the values we got from the original split
         # TODO: Do we need to keep both?
+        self.t1 = torch.tensor(self.t1)
+        self.t2 = torch.tensor(self.t2)
         self.train_indices = torch.tensor(self.train_indices)
         self.val_indices = torch.tensor(self.val_indices)
         self.test_indices = torch.tensor(self.test_indices)
