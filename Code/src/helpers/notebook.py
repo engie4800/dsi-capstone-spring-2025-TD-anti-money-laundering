@@ -1,3 +1,4 @@
+import logging
 from time import monotonic
 
 from IPython import get_ipython
@@ -13,7 +14,7 @@ class CellTimer:
     def stop(self, *args, **kwargs):
         try:
             delta = round(monotonic() - self.start_time, 2)
-            print(f"\n⏱️ Execution time: {delta}s")
+            logging.info(f"\n⏱️ Execution time: {delta}s")
         except TypeError:
             # The `stop` will be called when the cell that
             # defines `CellTimer` is executed, but `start`

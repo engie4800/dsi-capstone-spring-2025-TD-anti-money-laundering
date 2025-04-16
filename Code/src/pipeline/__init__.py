@@ -53,14 +53,14 @@ class ModelPipeline:
         }
 
     def df_summary(self):
-        print("DATA HEAD")
+        logging.info("DATA HEAD")
         display(self.df.head())
-        print("\nFEATURE TYPE")
+        logging.info("\nFEATURE TYPE")
         display(self.df.info())
 
     def y_statistics(self):
-        print("Normalized Value Count: ")
-        print(self.df["is_laundering"].value_counts(normalize=True))
+        logging.info("Normalized Value Count: ")
+        logging.info(self.df["is_laundering"].value_counts(normalize=True))
 
     def rename_columns(self):
         """
@@ -96,7 +96,7 @@ class ModelPipeline:
 
     def create_unique_ids(self):
         """Create unique account - ID mapping."""
-        print("Creating unique ids...")
+        logging.info("Creating unique ids...")
         if not self.preprocessed["renamed"]:
             raise RuntimeError("Columns must be renamed (run rename()) before creating unique IDs.")
         if "timestamp_int" not in self.df.columns:
@@ -136,7 +136,7 @@ class ModelPipeline:
         self.preprocessed["unique_ids_created"] = True
 
     def currency_normalization(self):
-        print("Normalizing currency...")
+        logging.info("Normalizing currency...")
         if "sent_currency" not in self.df.columns or "received_currency" not in self.df.columns:
             raise KeyError(
                 "Currency columns missing. Need to run 'rename_columns' "
@@ -155,7 +155,7 @@ class ModelPipeline:
         self.preprocessed["currency_normalized"] = True
 
     def extract_currency_features(self):
-        print("Extracting currency features...")
+        logging.info("Extracting currency features...")
         if "sent_currency" not in self.df.columns or "received_currency" not in self.df.columns:
             raise KeyError(
                 "Currency columns missing. Need to run 'rename_columns' "
@@ -169,7 +169,7 @@ class ModelPipeline:
         self.preprocessed["currency_features_extracted"] = True
 
     def extract_time_features(self):
-        print("Extracting time features...")
+        logging.info("Extracting time features...")
         if "timestamp" not in self.df.columns:
             raise KeyError(
                 "Missing 'timestamp' column, were columns renamed properly?"
@@ -197,7 +197,7 @@ class ModelPipeline:
         self.preprocessed["time_features_extracted"] = True
         
     def cyclical_encoding(self):
-        print("Adding cyclical encoding to time feats...")
+        logging.info("Adding cyclical encoding to time feats...")
         
         if not self.preprocessed["time_features_extracted"]:
             raise RuntimeError("Time features missing, run `extract_time_features` first.")
@@ -217,7 +217,7 @@ class ModelPipeline:
     
     def apply_one_hot_encoding(self, onehot_categorical_features= None):
         """One hot encode categorical columns, handling related columns"""
-        print("Applying one hot encoding...")
+        logging.info("Applying one hot encoding...")
         # Default columns for encoding
         default_categorical_features = ["payment_type", "received_currency", "sent_currency"]
 
@@ -262,12 +262,12 @@ class ModelPipeline:
         self.df.drop(columns=columns_to_drop, inplace=True)
         self.df = pd.concat([self.df] + encoded_dfs, axis=1)
 
-        print(f"  One hot encoding applied to columns: {categorical_features}\n")
+        logging.info(f"  One hot encoding applied to columns: {categorical_features}\n")
         self.preprocessed["onehot_encoded"] = True
         
     def apply_label_encoding(self, categorical_features=None):
         """Label encode categorical columns, handling related columns"""
-        print("Applying label encoding...")
+        logging.info("Applying label encoding...")
         # Default columns for encoding
         default_categorical_features = ["day_of_week", "from_bank", "to_bank"]
 
@@ -295,7 +295,7 @@ class ModelPipeline:
         for col in independent_cols:
             self.df[col] = LabelEncoder().fit_transform(self.df[col])
 
-        print(f"  Label encoding applied to columns: {categorical_features}\n")
+        logging.info(f"  Label encoding applied to columns: {categorical_features}\n")
         self.preprocessed["label_encoded"] = True
     
     def numerical_scaling(self, numerical_features):
@@ -311,7 +311,7 @@ class ModelPipeline:
 
     def add_graph_related_features(self, weight_cols):
         """Generate graph-based neighborhood context features"""
-        print("Adding graph related features...")
+        logging.info("Adding graph related features...")
 
         # Aggregate multiple edges into one per (from, to) pair
         # Otherwise DiGraph overwrites the information
@@ -341,12 +341,12 @@ class ModelPipeline:
             pagerank = nx.pagerank(G, weight="weight")
             self.nodes[f"pagerank_{weight_col}"] = self.nodes["node_id"].map(pagerank)
             
-        print(f"  Graph features computed using: {weight_cols}")
-        print("  **Note**, previously graph-based features were calculated using only `sent_amount` as edge weight (only based on outgoing transactions). Now both sent and received amounts are included by default.")
-        print(f"  New feature columns added: degree_centrality, in_degree_centrality, out_degree_centrality, {', '.join([f'pagerank_{col}' for col in weight_cols])}\n")
+        logging.info(f"  Graph features computed using: {weight_cols}")
+        logging.info("  **Note**, previously graph-based features were calculated using only `sent_amount` as edge weight (only based on outgoing transactions). Now both sent and received amounts are included by default.")
+        logging.info(f"  New feature columns added: degree_centrality, in_degree_centrality, out_degree_centrality, {', '.join([f'pagerank_{col}' for col in weight_cols])}\n")
 
     def add_node_features(self, node_features):
-        print("Adding node features...")
+        logging.info("Adding node features...")
 
         # Combining nodes and their respective features (source only, destination only, or both) into several dataframes
         all_nodes = []
@@ -404,11 +404,11 @@ class ModelPipeline:
                 "Unique account IDs must be created before computing network features"
             )
 
-        print("Extracting nodes...")
+        logging.info("Extracting nodes...")
 
         # Creating empty node dataframe
         num_nodes = self.df[['from_account_idx', 'to_account_idx']].max().max() + 1
-        print(f"Creating a Data Frame containing {num_nodes} nodes")
+        logging.info(f"Creating a Data Frame containing {num_nodes} nodes")
         self.nodes = pd.DataFrame({'node_id': np.arange(num_nodes)})
 
         # Adding node features to the dataframe
@@ -425,7 +425,7 @@ class ModelPipeline:
 
     def generate_tensors(self, edge_features, node_features=None, edges = ["from_account_idx", "to_account_idx"]):
         """Convert data to PyTorch tensor format for GNNs"""
-        print("Generating tensors...")
+        logging.info("Generating tensors...")
 
         def create_pyg_data(X, y, dataset_name):
 
@@ -437,11 +437,11 @@ class ModelPipeline:
             data = Data(edge_index=edge_index, edge_attr=edge_attr, x=node_attr, y=edge_labels)
 
             # Print tensor shapes
-            print(f"\nDataset: {dataset_name}")
-            print(f"  Edge Index Shape: {edge_index.shape} (should be [2, num_edges])")
-            print(f"  Edge Attribute Shape: {edge_attr.shape} (should be [num_edges, num_edge_features])")
-            print(f"  Node Attribute Shape: {node_attr.shape} (should be [num_nodes, num_node_features])")
-            print(f"  Edge Labels Shape: {edge_labels.shape} (should be [num_edges])")
+            logging.info(f"\nDataset: {dataset_name}")
+            logging.info(f"  Edge Index Shape: {edge_index.shape} (should be [2, num_edges])")
+            logging.info(f"  Edge Attribute Shape: {edge_attr.shape} (should be [num_edges, num_edge_features])")
+            logging.info(f"  Node Attribute Shape: {node_attr.shape} (should be [num_nodes, num_node_features])")
+            logging.info(f"  Edge Labels Shape: {edge_labels.shape} (should be [num_edges])")
             
             return data
 
@@ -457,7 +457,7 @@ class ModelPipeline:
         """Runs all preprocessing steps in the correct order.
            Option to not include graph_feats calculation (takes long time)
         """
-        print("Running preprocessing pipeline...\n")
+        logging.info("Running preprocessing pipeline...\n")
 
         try:
             self.rename_columns()
@@ -472,11 +472,11 @@ class ModelPipeline:
             self.apply_one_hot_encoding()
             if graph_feats:
                 self.extract_graph_features()
-            print("Preprocessing completed successfully!")
-            print(self.preprocessed)
+            logging.info("Preprocessing completed successfully!")
+            logging.info(self.preprocessed)
 
         except Exception as e:
-            print(f"Error in preprocessing: {e}")
+            logging.info(f"Error in preprocessing: {e}")
 
     def split_train_test_val(self, X_cols, y_col, test_size=0.15, val_size=0.15, split_type="random_stratified"):
         """Perform Train-Test-Validation Split
@@ -489,8 +489,8 @@ class ModelPipeline:
         valid_splits = ["random_stratified", "temporal", "temporal_agg"]
         
         if split_type is None: 
-            print("No split type entered; using default split_type: 'random_stratified'")
-            print("Valid split_type options:\n"
+            logging.info("No split type entered; using default split_type: 'random_stratified'")
+            logging.info("Valid split_type options:\n"
                 "- 'random_stratified' → Stratified random split maintaining label balance.\n"
                 "- 'temporal' → Sequential split based on timestamps.\n"
                 "- 'temporal_agg' → Aggregated sequential split (masking required in GNN evaluation).\n"
@@ -555,9 +555,9 @@ class ModelPipeline:
             self.X_val, self.y_val = X[:t2], y[:t2]
             self.X_test, self.y_test = X[:], y[:]
         
-        print(f"Data split using {split_type} method.")
+        logging.info(f"Data split using {split_type} method.")
         if split_type == "temporal_agg":
-            print("Remember to mask labels in GNN evaluation.\n"
+            logging.info("Remember to mask labels in GNN evaluation.\n"
                   " - Train: no mask \n"
                   " - Val: mask y_lab[:t1] (only evaluate labels y_lab[t1:t2]) \n"
                   " - Test: mask y_lab[:t2] (only evaluate labels y_lab[t2:])")
