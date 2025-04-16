@@ -35,7 +35,6 @@ def add_cell_timer() -> None:
 
     # Checks for existing events in the case of re-running the cell
     # that adds the cell timer in your notebook
-    breakpoint()
     for f in list(ipython.events.callbacks.get("pre_run_cell", [])):
         if isinstance(f.__self__, CellTimer):
             # The timer has already been registered. This might cause
