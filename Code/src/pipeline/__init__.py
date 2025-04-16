@@ -99,10 +99,15 @@ class ModelPipeline:
         print("Creating unique ids...")
         if not self.preprocessed["renamed"]:
             raise RuntimeError("Columns must be renamed (run rename()) before creating unique IDs.")
+        if "timestamp_int" not in self.df.columns:
+            raise KeyError(
+                "Timestamp column missing. Need to run 'extract_time_features' "
+                "preprocessing step first."
+            )
 
         # Sort transactions by timestamp first
-        self.df = self.df.sort_values(by='timestamp_int').reset_index(drop=True)
-        self.df['edge_id'] = self.df.index.astype(int)
+        self.df = self.df.sort_values(by="timestamp_int").reset_index(drop=True)
+        self.df["edge_id"] = self.df.index.astype(int)
 
         # Get unique account-bank combos (a couple of acct numbers found at multiple banks)
         self.df['from_account_id'] = self.df['from_bank'].astype(str) + '_' + self.df['from_account'].astype(str)
@@ -116,7 +121,7 @@ class ModelPipeline:
         ])
 
         # Sort by timestamp to reflect temporal ordering
-        accounts_ordered = accounts_ordered.sort_values(by='edge_id')
+        accounts_ordered = accounts_ordered.sort_values(by="edge_id")
 
         # Drop duplicates to get first-seen ordering of accounts
         unique_accounts = accounts_ordered.drop_duplicates(subset="account_id")["account_id"].reset_index(drop=True)
@@ -392,7 +397,7 @@ class ModelPipeline:
 
     def extract_nodes(self, node_features=None, graph_related_features=None):
         """Extract nodes (x) data that is used across splits"""
-        
+
         # Ensure that unique_ids have been generated
         if not self.preprocessed["unique_ids_created"]:
             raise RuntimeError(
@@ -457,11 +462,12 @@ class ModelPipeline:
         try:
             self.rename_columns()
             self.drop_duplicates()
-            self.create_unique_ids()
             self.currency_normalization()
+            self.extract_currency_features()
             self.extract_time_features()
             self.cyclical_encoding()
             self.binary_weekend()
+            self.create_unique_ids()
             self.apply_label_encoding()
             self.apply_one_hot_encoding()
             if graph_feats:
