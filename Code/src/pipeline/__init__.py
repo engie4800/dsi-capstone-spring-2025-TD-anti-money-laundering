@@ -534,18 +534,36 @@ class ModelPipeline:
         except Exception as e:
             logging.info(f"Error in preprocessing: {e}")
 
-    def split_train_test_val(self, X_cols, y_col, test_size=0.15, val_size=0.15, split_type="random_stratified"):
+    def split_train_test_val(
+        self,
+        X_cols=None,
+        y_col="is_laundering",
+        test_size=0.15,
+        val_size=0.15,
+        split_type="random_stratified",
+    ):
         """Perform Train-Test-Validation Split
-            OPTIONS: ["random_stratified", "temporal", "temporal_agg"]
-            "random stratified": Data is randomized and split while keeping `is_laundering` label proportionate bt train/val/test.
-            "temporal": Data is sorted by timestamp, and split into df[:t1], df[t1:t2], df[t2:]
-            "temporal_agg": Data is sorted by timestamp and split into df[:t1], df[:t2], df[:].
-                Note that in GNN, need to mask labels s.t. val only evaluates df[t1:t2] labels and test only evaluates df[t2:] labels.
-        """
-        valid_splits = ["random_stratified", "temporal", "temporal_agg"]
 
+        OPTIONS: ["random_stratified", "temporal", "temporal_agg"]
+
+        "random stratified": Data is randomized and split while keeping
+            `is_laundering` label proportionate bt train/val/test.
+        "temporal": Data is sorted by timestamp, and split into
+            df[:t1], df[t1:t2], df[t2:]
+        "temporal_agg": Data is sorted by timestamp and split into
+            df[:t1], df[:t2], df[:].
+        
+        Note that in GNN, need to mask labels s.t. val only evaluates
+        df[t1:t2] labels and test only evaluates df[t2:] labels.
+        """
+
+        # Ensure a valid split is chosen
+        valid_splits = ["random_stratified", "temporal", "temporal_agg"]
         if split_type is None:
-            logging.info("No split type entered; using default split_type: 'random_stratified'")
+            logging.info(
+                "No split type entered; using default split_type: "
+                "'random_stratified'"
+            )
             logging.info("Valid split_type options:\n"
                 "- 'random_stratified' → Stratified random split maintaining label balance.\n"
                 "- 'temporal' → Sequential split based on timestamps.\n"
@@ -559,13 +577,19 @@ class ModelPipeline:
                 f"Invalid split_type: '{split_type}'.\n"
                 f"Expected one of {valid_splits}.\n"
                 "Please choose a valid option:\n"
-                "- 'random_stratified' → Stratified random split maintaining label balance.\n"
-                "- 'temporal' → Sequential split based on timestamps.\n"
-                "- 'temporal_agg' → Aggregated sequential split with masking required in GNN evaluation.\n"
+                "- 'random_stratified'\n"
+                "- 'temporal'\n"
+                "- 'temporal_agg'\n"
                 "See `split_train_test_val` for more details."
             )
-
         self.split_type = split_type
+
+        # Allow `split_train_test_val` to default to using all columns
+        # for the set of `X_cols`
+        if X_cols is None:
+            X_cols = sorted(list(set(self.df.columns) - "is_laundering"))
+        logging.info("Using the following set of 'X_cols'")
+        logging.info(X_cols)
 
         if self.split_type == "random_stratified":
             X = self.df[X_cols]
