@@ -80,11 +80,11 @@ class ModelPipeline:
         logging.info("Normalized Value Count: ")
         logging.info(self.df["is_laundering"].value_counts(normalize=True))
 
-    def rename_columns(self):
+    def rename_columns(self) -> None:
         """
         Renames the columns of `self.df` to follow a consistent
-        semantics, in terms of to and from, sent and received, and to
-        use the more pythonic snake case
+        semantics, in terms of using to and from, or sent and received,
+        and to use the Pythonic snake case
         """
         column_mapping = {
             "Timestamp": "timestamp",
@@ -101,9 +101,15 @@ class ModelPipeline:
         }
 
         # Ensure required columns exist
-        missing_columns = [col for col in column_mapping.keys() if col not in self.df.columns]
+        missing_columns = [
+            col
+            for col in column_mapping.keys()
+            if col not in self.df.columns
+        ]
         if missing_columns:
-            raise KeyError(f"Missing expected columns in dataset: {missing_columns}")
+            raise KeyError(
+                f"Missing expected columns in dataset: {missing_columns}"
+            )
 
         self.df.rename(columns=column_mapping, inplace=True)
         self.preprocessed["renamed"] = True
