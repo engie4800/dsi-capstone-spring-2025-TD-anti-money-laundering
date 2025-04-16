@@ -53,6 +53,7 @@ class ModelPipeline:
         self.preprocessed = {
             "renamed": False,
             "duplicates_removed": False,
+            "checked_for_null_values": False,
             "unique_ids_created": False,
             "currency_normalized": False,
             "currency_features_extracted": False,
@@ -114,9 +115,25 @@ class ModelPipeline:
         self.df.rename(columns=column_mapping, inplace=True)
         self.preprocessed["renamed"] = True
 
-    def drop_duplicates(self):
+    def drop_duplicates(self) -> None:
+        """
+        Removes any duplicate rows in the data frame
+        """
         self.df.drop_duplicates(inplace=True)
         self.preprocessed["duplicates_removed"] = True
+
+    def check_for_null(self) -> None:
+        """
+        Confirm that the given dataset does not contain any null values
+        """
+        if self.df.isnull().values.any():
+            # Need to determine how to handle null values on a dataset
+            # that has them
+            raise ValueError(
+                "Pipeline was developed on data that does not contain "
+                "null values. Null values detected, remove them!"
+            )
+        self.preprocessed["checked_for_null_values"] = True
 
     def currency_normalization(self):
         logging.info("Normalizing currency...")
@@ -538,6 +555,7 @@ class ModelPipeline:
         try:
             self.rename_columns()
             self.drop_duplicates()
+            self.check_for_null()
             self.currency_normalization()
             self.extract_currency_features()
             self.extract_time_features()
