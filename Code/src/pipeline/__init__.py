@@ -46,6 +46,7 @@ class ModelPipeline:
             "currency_normalized": False,
             "currency_features_extracted": False,
             "time_features_extracted": False,
+            "additional_time_features_extracted": False,
             "cyclical_encoded": False,
             "weekend_encoded": False,
             "label_encoded": False,
@@ -95,47 +96,6 @@ class ModelPipeline:
     def drop_duplicates(self):
         self.df.drop_duplicates(inplace=True)
         self.preprocessed["duplicates_removed"] = True
-
-    def create_unique_ids(self):
-        """Create unique account - ID mapping."""
-        logging.info("Creating unique ids...")
-        if not self.preprocessed["renamed"]:
-            raise RuntimeError("Columns must be renamed (run rename()) before creating unique IDs.")
-        if "timestamp_int" not in self.df.columns:
-            raise KeyError(
-                "Timestamp column missing. Need to run 'extract_time_features' "
-                "preprocessing step first."
-            )
-
-        # Sort transactions by timestamp first
-        self.df = self.df.sort_values(by="timestamp_int").reset_index(drop=True)
-        self.df["edge_id"] = self.df.index.astype(int)
-
-        # Get unique account-bank combos (a couple of acct numbers found at multiple banks)
-        self.df['from_account_id'] = self.df['from_bank'].astype(str) + '_' + self.df['from_account'].astype(str)
-        self.df['to_account_id'] = self.df['to_bank'].astype(str) + '_' + self.df['to_account'].astype(str)
-        self.df.drop(columns=["from_account", "to_account"], inplace=True)
-
-        # Combine all accounts in the order they appear, preserving timestamp order
-        accounts_ordered = pd.concat([
-            self.df[["edge_id", "from_account_id"]].rename(columns={"from_account_id": "account_id"}),
-            self.df[["edge_id", "to_account_id"]].rename(columns={"to_account_id": "account_id"})
-        ])
-
-        # Sort by timestamp to reflect temporal ordering
-        accounts_ordered = accounts_ordered.sort_values(by="edge_id")
-
-        # Drop duplicates to get first-seen ordering of accounts
-        unique_accounts = accounts_ordered.drop_duplicates(subset="account_id")["account_id"].reset_index(drop=True)
-
-        # Create mapping: account_id → index based on first appearance
-        node_mapping = {account: idx for idx, account in enumerate(unique_accounts)}
-
-        # Map node identifiers to integer indices
-        self.df["from_account_idx"] = self.df["from_account_id"].map(node_mapping)
-        self.df["to_account_idx"] = self.df["to_account_id"].map(node_mapping)
-
-        self.preprocessed["unique_ids_created"] = True
 
     def currency_normalization(self):
         logging.info("Normalizing currency...")
@@ -197,6 +157,100 @@ class ModelPipeline:
         self.df.drop(columns=["timestamp"], inplace= True)
         
         self.preprocessed["time_features_extracted"] = True
+
+    def create_unique_ids(self):
+        """Create unique account - ID mapping."""
+        logging.info("Creating unique ids...")
+        if not self.preprocessed["renamed"]:
+            raise RuntimeError(
+                "Columns must be renamed before creating unique IDs."
+            )
+        if "timestamp_int" not in self.df.columns:
+            raise KeyError(
+                "Timestamp column missing. Need to run 'extract_time_features' "
+                "preprocessing step first."
+            )
+
+        # Sort transactions by timestamp first
+        self.df = self.df.sort_values(by="timestamp_int").reset_index(drop=True)
+        self.df["edge_id"] = self.df.index.astype(int)
+
+        # Get unique account-bank combos (a couple of acct numbers found at multiple banks)
+        self.df['from_account_id'] = self.df['from_bank'].astype(str) + '_' + self.df['from_account'].astype(str)
+        self.df['to_account_id'] = self.df['to_bank'].astype(str) + '_' + self.df['to_account'].astype(str)
+        self.df.drop(columns=["from_account", "to_account"], inplace=True)
+
+        # Combine all accounts in the order they appear, preserving timestamp order
+        accounts_ordered = pd.concat([
+            self.df[["edge_id", "from_account_id"]].rename(columns={"from_account_id": "account_id"}),
+            self.df[["edge_id", "to_account_id"]].rename(columns={"to_account_id": "account_id"})
+        ])
+
+        # Sort by timestamp to reflect temporal ordering
+        accounts_ordered = accounts_ordered.sort_values(by="edge_id")
+
+        # Drop duplicates to get first-seen ordering of accounts
+        unique_accounts = accounts_ordered.drop_duplicates(subset="account_id")["account_id"].reset_index(drop=True)
+
+        # Create mapping: account_id → index based on first appearance
+        node_mapping = {account: idx for idx, account in enumerate(unique_accounts)}
+
+        # Map node identifiers to integer indices
+        self.df["from_account_idx"] = self.df["from_account_id"].map(node_mapping)
+        self.df["to_account_idx"] = self.df["to_account_id"].map(node_mapping)
+
+        self.preprocessed["unique_ids_created"] = True
+
+    def get_turnaround_time(self):
+        """
+        Keep track of last received timestamp per account
+        """
+        last_received_time = {}
+        turnaround_times = []
+        for _, row in self.df.iterrows():
+            from_id = row["from_account_idx"]
+            to_id = row["to_account_idx"]
+            timestamp = row["timestamp_int"]
+
+            # Compute turnaround if account had received money earlier
+            turnaround_time = timestamp - last_received_time.get(from_id, np.nan)
+            turnaround_times.append(turnaround_time)
+
+            # Update last received time for the destination
+            last_received_time[to_id] = timestamp
+
+        self.df["turnaround_time"] = turnaround_times
+        self.df["turnaround_time"] = self.df["turnaround_time"].fillna(-1)  # optional
+
+    def extract_additional_time_features(self):
+        """
+        Additional time features can be extracted after creating unique
+        IDs, which depends on the initial time feature extraction
+        """
+        logging.info("Extracting additional time features...")
+        if not self.preprocessed["unique_ids_created"]:
+            raise RuntimeError(
+                "Unique IDs must be created before extracting "
+                "additional time features."
+            )
+
+        # Ensures data is sorted by timestamp
+        self.df = self.df.sort_values(
+            by=["from_account_idx", "timestamp_int"]
+        ).reset_index(drop=True)
+
+        # Group by account and compute time difference from previous transaction
+        self.df["time_diff_from"] = self.df.groupby("from_account_idx")["timestamp_int"].diff()
+        self.df["time_diff_from"] = self.df["time_diff_from"].fillna(-1)
+
+        # Sort by 'edge_id', which is how the dataframe is sorted prior
+        # to calling 'extract_additional_time_features'
+        self.df = self.df.sort_values(by="edge_id").reset_index(drop=True)
+
+        # Extract turnaround time, too
+        self.get_turnaround_time()
+
+        self.preprocessed["additional_time_features_extracted"] = True
         
     def cyclical_encoding(self):
         logging.info("Adding cyclical encoding to time feats...")
@@ -470,6 +524,7 @@ class ModelPipeline:
             self.cyclical_encoding()
             self.binary_weekend()
             self.create_unique_ids()
+            self.extract_additional_time_features()
             self.apply_label_encoding()
             self.apply_one_hot_encoding()
             if graph_feats:
