@@ -186,7 +186,7 @@ class ModelPipeline:
 
         """
         logging.info("Extracting time features...")
-        Checker.timestamp_required()
+        Checker.timestamp_required(self)
 
         if not isinstance(self.df["timestamp"], datetime.datetime):
             self.df["timestamp"] = pd.to_datetime(self.df["timestamp"])
