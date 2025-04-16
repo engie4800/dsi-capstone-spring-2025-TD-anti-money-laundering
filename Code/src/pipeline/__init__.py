@@ -24,6 +24,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
 from torch_geometric.data import Data
+from torch_geometric.loader import LinkNeighborLoader
 
 from helpers.currency import get_usd_conversion
 
@@ -56,6 +57,7 @@ class ModelPipeline:
             "train_test_val_data_split": False,
             "post_split_node_features": False,
             "train_test_val_data_split_graph": False,
+            "got_data_loaders": False,
         }
 
     def df_summary(self):
@@ -790,20 +792,7 @@ class ModelPipeline:
         # A default set of edge features that excludes some obvious
         # features we don't want
         if edge_features is None:
-            edge_features = self.X_cols
-            # edge_features = self.X_cols - set([
-            #     # TODO: any reason not to do this?
-            #     # NOTE: seeing if these features are incompatible by
-            #     # removing them (they weren't included in the gnn
-            #     # baseline notebook for some reason)
-            #     "day_of_week",
-            #     "hour_of_day",
-            #     "is_weekend",
-            #     "received_amount",
-            #     "seconds_since_midnight",
-            #     "sent_amount",
-            #     "timestamp_int",
-            # ])
+            edge_features = self.X_cols  # TODO: any reason not to do this?
 
         # Nodes
         tr_x = torch.tensor(self.train_nodes.drop(columns="node_id").values, dtype=torch.float)
@@ -859,6 +848,82 @@ class ModelPipeline:
             self.test_data,
             self.edge_index,
             self.y,
+        )
+
+    def get_data_loaders(self, num_neighbors=[100,100], batch_size=8192):
+        logging.info("Getting data loaders")
+        if not self.preprocessed["train_test_val_data_split_graph"]:
+            raise RuntimeError(
+                "Cannot get data loaders for GNN until the graph train-"
+                "test split is complete."
+            )
+
+        def scale_data(data, cols_to_scale):
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
+            edge_attr_cpu = data.edge_attr.cpu().numpy()
+
+            for col in cols_to_scale:
+                col_data = edge_attr_cpu[:, col]
+                col_data = col_data.copy()
+
+                # Mask to identify valid (non -1) values
+                mask = col_data != -1
+                if np.sum(mask) == 0:
+                    continue  # skip column if all are -1
+
+                # Median impute and scale
+                median_val = np.median(col_data[mask])
+                col_data[~mask] = median_val
+                edge_attr_cpu[:, col] = StandardScaler().fit_transform(col_data.reshape(-1, 1)).flatten()
+
+            data.edge_attr = torch.from_numpy(edge_attr_cpu).float().to(device)
+            data.x = data.x.to(device)
+            data.y = data.y.to(device)
+            return data
+
+        # Standard scale on CPU before sending to device
+        # TODO: does it make sense to overwrite data here?
+        self.train_data = scale_data(self.train_data, [1, 2, 3, 4, 5])
+        self.val_data = scale_data(self.val_data, [1, 2, 3, 4, 5])
+        self.test_data = scale_data(self.test_data, [1, 2, 3, 4, 5])
+
+        self.train_loader = LinkNeighborLoader(
+            data=self.train_data,
+            edge_label_index=self.edge_index[:, self.train_indices],
+            edge_label=self.y[self.train_indices],
+            batch_size=batch_size,
+            num_neighbors=num_neighbors,
+            shuffle=True
+        )
+
+        self.val_loader = LinkNeighborLoader(
+            data=self.val_data,
+            edge_label_index=self.edge_index[:, self.val_indices],
+            edge_label=self.y[self.val_indices],
+            batch_size=batch_size,
+            num_neighbors=num_neighbors,
+            shuffle=False
+        )
+
+        self.test_loader = LinkNeighborLoader(
+            data=self.test_data,
+            edge_label_index=self.edge_index[:, self.test_indices],
+            edge_label=self.y[self.test_indices],
+            batch_size=batch_size,
+            num_neighbors=num_neighbors,
+            shuffle=False
+        )
+
+        self.preprocessed["got_data_loaders"] = True
+
+        return (
+            self.train_loader,
+            self.val_loader,
+            self.test_loader,
+            self.train_data,
+            self.val_data,
+            self.test_data,
         )
 
     def result_metrics(self, slide_title, y_train, y_train_pred, y_train_proba,
