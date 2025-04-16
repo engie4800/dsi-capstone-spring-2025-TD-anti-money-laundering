@@ -35,9 +35,9 @@ from torchmetrics.classification import (
 )
 from tqdm import tqdm
 
-from checks import Checker
 from helpers.currency import get_usd_conversion
 from model import GINe
+from pipeline.checks import Checker
 
 
 class ModelPipeline:
