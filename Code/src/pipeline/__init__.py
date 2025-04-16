@@ -52,7 +52,8 @@ class ModelPipeline:
             "label_encoded": False,
             "neighbor_context_computed": False,
             "normalized": False,
-            "onehot_encoded": False
+            "onehot_encoded": False,
+            "train_test_val_data_split": False,
         }
 
     def df_summary(self):
@@ -556,6 +557,8 @@ class ModelPipeline:
         Note that in GNN, need to mask labels s.t. val only evaluates
         df[t1:t2] labels and test only evaluates df[t2:] labels.
         """
+        self.test_size = test_size
+        self.val_size = val_size
 
         # Ensure a valid split is chosen
         valid_splits = ["random_stratified", "temporal", "temporal_agg"]
@@ -643,7 +646,119 @@ class ModelPipeline:
                 " - Val: mask y_lab[:t1] (only evaluate labels y_lab[t1:t2]) \n"
                 " - Test: mask y_lab[:t2] (only evaluate labels y_lab[t2:])")
 
+        self.preprocessed["train_test_val_data_split"] = True
+
+        # We should just always get (and attach to the pipeline) the
+        # split indices
+        self.get_split_indices()
+
         return self.X_train, self.X_val, self.X_test, self.y_train, self.y_val, self.y_test
+
+    def get_split_indices(self):
+        """
+        Returns numpy arrays of appropriate indices based on validation
+        and test sizes
+        """
+        if not self.preprocessed["train_test_val_data_split"]:
+            raise RuntimeError(
+                "Data must have been split into train, test, validation "
+                "sets before getting split indices."
+            )
+
+        num_edges = len(self.df)
+
+        self.t1 = int(num_edges * (1 - self.val_size - self.test_size))
+        self.t2 = int(num_edges * (1 - self.test_size))
+        self.train_indices = np.arange(0, self.t1)
+        self.val_indices = np.arange(self.t1, self.t2)
+        self.test_indices = np.arange(self.t2, num_edges)
+        self.train_val_indices = np.concat([self.train_indices, self.val_indices])
+        self.train_val_test_indices = np.concat([self.train_val_indices, self.test_indices])
+
+        return (
+            self.t1,
+            self.t2,
+            self.train_indices,
+            self.val_indices,
+            self.test_indices,
+            self.train_val_indices,
+            self.train_val_test_indices,
+        )
+
+    def compute_split_specific_node_features(
+        self,
+        graph_features: list[str] = ["sent_amount_usd"],
+    ) -> None:
+        """
+        Compute node features for a specific split using `from_account_idx`
+        and `to_account_idx` as node identifiers.
+        """
+        logging.info("Getting train-test-split-specific node features")
+        if not self.preprocessed["train_test_val_data_split"]:
+            raise RuntimeError(
+                "Data must have been split into train, test, validation "
+                "sets before getting split indices."
+            )
+
+        def get_node_features(split_edges, split_name: str, graph_features):
+            # TODO: this duplicates to some extent some of the other
+            # graph feature functions on the pipeline, which we should
+            # clean up
+
+            logging.info(f"Computing {split_name} node features...")
+
+            # Aggregate edges by from-to pairs
+            aggregated_edges = (
+                split_edges
+                .groupby(["from_account_idx", "to_account_idx"])[graph_features]
+                .sum()
+                .reset_index()
+            )
+
+            # Build directed graph using account indices as node ids
+            G = nx.DiGraph()
+            for _, row in aggregated_edges.iterrows():
+                G.add_edge(
+                    int(row["from_account_idx"]),
+                    int(row["to_account_idx"]),
+                    **{col: row[col] for col in graph_features}
+                )
+
+            # Compute graph features using account index as node_id
+            degree_centrality = nx.degree_centrality(G)
+            in_deg = {n: d / (len(G) - 1) for n, d in G.in_degree()}
+            out_deg = {n: d / (len(G) - 1) for n, d in G.out_degree()}
+            pagerank = nx.pagerank(G, weight="sent_amount_usd")
+
+            # Collect into DataFrame
+            node_df = pd.DataFrame({"node_id": list(G.nodes)})
+            node_df["degree_centrality"] = node_df["node_id"].map(degree_centrality)
+            node_df["in_degree"] = node_df["node_id"].map(in_deg)
+            node_df["out_degree"] = node_df["node_id"].map(out_deg)
+            node_df["pagerank"] = node_df["node_id"].map(pagerank)
+
+            # Ensure completeness and ordering
+            node_df.fillna(0, inplace=True)
+            node_df = node_df.sort_values("node_id").reset_index(drop=True)
+
+            logging.info(f"Computed node features for {split_name} with {len(node_df)} nodes.")
+            return node_df
+
+        self.train_nodes = get_node_features(
+            split_edges=self.df.loc[self.train_indices, :],
+            split_name="train",
+            graph_features=graph_features
+        )
+        self.val_nodes = get_node_features(
+            split_edges=self.df.loc[self.train_val_indices, :],
+            split_name="val",
+            graph_features=graph_features
+        )
+        self.test_nodes = get_node_features(
+            split_edges=self.df.loc[self.train_val_test_indices, :],
+            split_name="test",
+            graph_features=graph_features
+        )
 
     def result_metrics(self, slide_title, y_train, y_train_pred, y_train_proba,
                        y_val, y_val_pred, y_val_proba,
