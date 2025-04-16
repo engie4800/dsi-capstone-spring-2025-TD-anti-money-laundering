@@ -99,6 +99,7 @@ class ModelPipeline:
         print("Creating unique ids...")
         if not self.preprocessed["renamed"]:
             raise RuntimeError("Columns must be renamed (run rename()) before creating unique IDs.")
+        print("Test")
         if "timestamp_int" not in self.df.columns:
             raise KeyError(
                 "Timestamp column missing. Need to run 'extract_time_features' "
