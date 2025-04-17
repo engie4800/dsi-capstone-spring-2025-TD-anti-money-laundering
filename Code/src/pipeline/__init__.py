@@ -1122,7 +1122,7 @@ class ModelPipeline:
             pr_auc_fn(probs, targets)
         )
 
-    def train(self, threshold=0.5, epochs=20):
+    def train(self, threshold=0.5, epochs=20, patience=10):
 
         acc_fn = BinaryAccuracy(threshold=threshold).to(self.device)
         prec_fn = BinaryPrecision(threshold=threshold).to(self.device)
@@ -1131,6 +1131,9 @@ class ModelPipeline:
         pr_auc_fn = BinaryAveragePrecision().to(self.device)
 
         best_val_f1 = 0
+        best_pr_auc = 0
+        patience_counter = 0  # for early stopping
+        min_epochs = 10       # don't allow early model saving
 
         for epoch in range(epochs):
             self.model.train()
@@ -1204,8 +1207,17 @@ class ModelPipeline:
 
             self.scheduler.step(val_f1)
 
-            if val_f1 > best_val_f1:
-                best_val_f1 = val_f1
-                torch.save(self.model.state_dict(), "best_model.pt")
+            if epoch >= min_epochs and ((val_f1 > best_val_f1) or (val_pr_auc > best_pr_auc)):
+                best_val_f1 = max(val_f1, best_val_f1)
+                best_pr_auc = max(val_pr_auc, best_pr_auc)
+                patience_counter = 0
+                torch.save(self.model.state_dict(), f"best_model_epoch{epoch+1}.pt")
+                print("✅ New best model saved.")
+            elif epoch >= min_epochs:
+                patience_counter += 1
+                print(f"⚠️ No improvement. Patience: {patience_counter}/{patience}")
+                if patience_counter >= patience:
+                    print("🛑 Early stopping triggered.")
+                    break
 
             torch.cuda.empty_cache()
