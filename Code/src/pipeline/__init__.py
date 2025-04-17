@@ -37,7 +37,11 @@ from tqdm import tqdm
 
 from helpers.currency import get_usd_conversion
 from model import GINe
-from model.features import add_turnaround_time
+from model.features import (
+    add_turnaround_time,
+    add_received_amount_usd,
+    add_sent_amount_usd,
+)
 from pipeline.checks import Checker
 
 
@@ -145,16 +149,9 @@ class ModelPipeline:
         """
         logging.info("Normalizing currency...")
         Checker.currency_columns_required(self)
-
         usd_conversion = get_usd_conversion(self.dataset_path)
-        self.df["sent_amount_usd"] = self.df.apply(
-            lambda row: row["sent_amount"] * usd_conversion.get(row["sent_currency"], 1),
-            axis=1,
-        )
-        self.df["received_amount_usd"] = self.df.apply(
-            lambda row: row["received_amount"] * usd_conversion.get(row["received_currency"], 1),
-            axis=1,
-        )
+        self.df = add_sent_amount_usd(self.df, usd_conversion)
+        self.df = add_received_amount_usd(self.df, usd_conversion)
         self.preprocessed["currency_normalized"] = True
 
     def extract_currency_features(self) -> None:

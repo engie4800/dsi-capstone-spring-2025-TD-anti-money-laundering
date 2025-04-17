@@ -12,7 +12,29 @@ import numpy as np
 import pandas as pd
 
 
-def add_turnaround_time(df: pd.DataFrame) -> None:
+def add_sent_amount_usd(df: pd.DataFrame, usd_conversion: dict) -> pd.DataFrame:
+    """Adds the `sent_amount_usd` feature, which is the sent amount
+    converted to USD
+    """
+    df["sent_amount_usd"] = df.apply(
+        lambda row: row["sent_amount"] * usd_conversion.get(row["sent_currency"], 1),
+        axis=1,
+    )
+    return df
+
+
+def add_received_amount_usd(df: pd.DataFrame, usd_conversion: dict) -> pd.DataFrame:
+    """Adds the `received_amount_usd` feature, which is the received
+    amount converted to USD
+    """
+    df["received_amount_usd"] = df.apply(
+        lambda row: row["received_amount"] * usd_conversion.get(row["received_currency"], 1),
+        axis=1,
+    )
+    return df
+
+
+def add_turnaround_time(df: pd.DataFrame) -> pd.DataFrame:
     """Adds the `turnaround_time` feature, which is the time elapsed
     since the sender in a given transaction has received money
     """
@@ -34,3 +56,5 @@ def add_turnaround_time(df: pd.DataFrame) -> None:
     # Uses `-1` instead of `np.nan` to indicate missing turnaround time
     df["turnaround_time"] = turnaround_times
     df["turnaround_time"] = df["turnaround_time"].fillna(-1)
+
+    return df
