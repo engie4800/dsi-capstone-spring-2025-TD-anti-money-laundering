@@ -67,6 +67,7 @@ class ModelPipeline:
             "onehot_encoded": False,
             "train_test_val_data_split": False,
             "post_split_node_features": False,
+            "node_datasets_scaled": False,
             "train_test_val_data_split_graph": False,
             "got_data_loaders": False,
         }
@@ -714,11 +715,7 @@ class ModelPipeline:
         and `to_account_idx` as node identifiers.
         """
         logging.info("Getting train-test-split-specific node features")
-        if not self.preprocessed["train_test_val_data_split"]:
-            raise RuntimeError(
-                "Data must have been split into train, test, validation "
-                "sets before getting split indices."
-            )
+        Checker.data_split_to_train_val_test(self)
 
         def get_node_features(split_df, split_name: str, graph_features):
             # TODO: this duplicates to some extent some of the other
@@ -731,34 +728,34 @@ class ModelPipeline:
             # Outgoing stats (from_account_idx)
             out_stats = (
                 split_df.groupby("from_account_idx")["sent_amount_usd"]
-                .agg(["count", "sum", "mean", "std", "min", "max"])
-                .add_prefix("out_")
-                .reset_index()
-                .rename(columns={"from_account_idx": "node_id"})
+                    .agg(["count", "sum", "mean", "std", "min", "max"])
+                    .add_prefix("out_")
+                    .reset_index()
+                    .rename(columns={"from_account_idx": "node_id"})
             )
 
             # Incoming stats (to_account_idx)
             in_stats = (
                 split_df.groupby("to_account_idx")["sent_amount_usd"]
-                .agg(["count", "sum", "mean", "std", "min", "max"])
-                .add_prefix("in_")
-                .reset_index()
-                .rename(columns={"to_account_idx": "node_id"})
+                    .agg(["count", "sum", "mean", "std", "min", "max"])
+                    .add_prefix("in_")
+                    .reset_index()
+                    .rename(columns={"to_account_idx": "node_id"})
             )
 
             # Number of unique partners
             unique_out = (
                 split_df.groupby("from_account_idx")["to_account_idx"]
-                .nunique()
-                .reset_index()
-                .rename(columns={"from_account_idx": "node_id", "to_account_idx": "num_unique_out_partners"})
+                    .nunique()
+                    .reset_index()
+                    .rename(columns={"from_account_idx": "node_id", "to_account_idx": "num_unique_out_partners"})
             )
 
             unique_in = (
                 split_df.groupby("to_account_idx")["from_account_idx"]
-                .nunique()
-                .reset_index()
-                .rename(columns={"to_account_idx": "node_id", "from_account_idx": "num_unique_in_partners"})
+                    .nunique()
+                    .reset_index()
+                    .rename(columns={"to_account_idx": "node_id", "from_account_idx": "num_unique_in_partners"})
             )
 
             # Merge transactional stats
@@ -823,9 +820,58 @@ class ModelPipeline:
             split_name="test",
             graph_features=graph_features
         )
-        breakpoint()
 
         self.preprocessed["post_split_node_features"] = True
+
+    def scale_node_data_frames(self, cols_to_scale=None):
+        logging.info("Scaling node data frames...")
+        Checker.train_val_test_node_features_added(self)
+
+        def preprocess_column(col_series):
+            """Impute -1 values with median of the valid values."""
+            mask = col_series != -1
+            if mask.sum() == 0:
+                return col_series, None  # No valid values to impute/scale
+            median_val = np.median(col_series[mask])
+            col_series = col_series.copy()
+            col_series[~mask] = median_val
+            return col_series, median_val
+
+        if cols_to_scale is None:
+            breakpoint()
+
+        train_nodes = self.train_nodes.copy()
+        val_nodes = self.val_nodes.copy()
+        test_nodes = self.test_nodes.copy()
+
+        scalers = {}
+
+        for col in cols_to_scale:
+            # Impute -1 in train
+            train_col, train_median = preprocess_column(train_nodes[col])
+            train_nodes[col] = train_col
+
+            # Fit scaler on train
+            scaler = StandardScaler()
+            train_nodes[col] = scaler.fit_transform(train_nodes[col].values.reshape(-1, 1)).flatten()
+            scalers[col] = (scaler, train_median)
+
+            # Impute -1 in val/test with train median
+            for df in [val_nodes, test_nodes]:
+                if col in df.columns:
+                    col_vals = df[col].copy()
+                    col_vals[col_vals == -1] = train_median
+                    df[col] = scalers[col][0].transform(col_vals.values.reshape(-1, 1)).flatten()
+
+        # TODO: do we need to have ever copied these, or could we just
+        # use / update them in place?
+        self.train_nodes = train_nodes
+        self.val_nodes = val_nodes
+        self.test_nodes = test_nodes
+
+        self.preprocessed["node_datasets_scaled"] = True
+
+        return self.train_nodes, self.val_nodes, self.test_nodes
 
     def split_train_test_val_graph(self, edge_features=None):
         logging.info("Splitting into train, test, validation graphs")

@@ -40,3 +40,17 @@ class Checker:
                 "distinct  bank, account pair) to have a unique "
                 "identifier."
             )
+
+    def data_split_to_train_val_test(pipeline: "ModelPipeline") -> None:
+        if not pipeline.preprocessed["train_test_val_data_split"]:
+            raise RuntimeError(
+                "Data must have been split into train, test, validation "
+                "sets before running this method."
+            )
+
+    def train_val_test_node_features_added(pipeline: "ModelPipeline") -> None:
+        if not pipeline.preprocessed["post_split_node_features"]:
+            raise RuntimeError(
+                "This method requires node-specific features to have "
+                "been added to the pipeline."
+            )
