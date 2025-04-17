@@ -22,14 +22,45 @@ def add_currency_changed(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def add_sent_amount_usd(df: pd.DataFrame, usd_conversion: dict) -> pd.DataFrame:
-    """Adds the `sent_amount_usd` feature, which is the sent amount
-    converted to USD
+def add_day_of_week(df: pd.DataFrame) -> pd.DataFrame:
+    """Adds the `day_of_week` feature, which is an integer representing
+    which day of the week (0, 1, 2, ..., 6) the transaction occurs
     """
-    df["sent_amount_usd"] = df.apply(
-        lambda row: row["sent_amount"] * usd_conversion.get(row["sent_currency"], 1),
-        axis=1,
-    )
+    df["day_of_week"] = df["timestamp"].dt.weekday
+    return df
+
+
+def add_hour_of_day(df: pd.DataFrame) -> pd.DataFrame:
+    """Adds the `hour_of_day` feature, which is an integer representing
+    which hour during the day (0, 1, 2, ..., 23) the transaction occurs
+    """
+    df["hour_of_day"] = df["timestamp"].dt.hour
+    return df
+
+
+def add_is_weekend(df: pd.DataFrame) -> pd.DataFrame:
+    """Adds the `is_weekend` feature, which is an indicator of whether
+    the transaction occurs during the weekend (1) or week (0)
+    """
+    df["is_weekend"] = df["day_of_week"].isin([5, 6]).astype(int)
+    return df
+
+
+def add_timestamp_int(df: pd.DataFrame) -> pd.DataFrame:
+    """Adds the `timestamp_int` feature, the Unix time at which the
+    transaction occurred
+    """
+    df["timestamp_int"] = df["timestamp"].astype("int64") / 10**9
+    return df
+
+
+def add_timestamp_scaled(df: pd.DataFrame) -> pd.DataFrame:
+    """Prefills the `timestamp_scaled` feature as the Unix time, it
+    will be scaled later
+    """
+    # TODO: can we just scale it now? Or, can we avoid adding it and
+    # use `timestamp_int` when we scale it later?
+    df["timestamp_scaled"] = df["timestamp"].astype("int64") / 10**9
     return df
 
 
@@ -39,6 +70,30 @@ def add_received_amount_usd(df: pd.DataFrame, usd_conversion: dict) -> pd.DataFr
     """
     df["received_amount_usd"] = df.apply(
         lambda row: row["received_amount"] * usd_conversion.get(row["received_currency"], 1),
+        axis=1,
+    )
+    return df
+
+
+def add_seconds_since_midnight(df: pd.DataFrame) -> pd.DataFrame:
+    """Adds the `seconds_since_midnight` feature, which is the number
+    of seconds that have elapsed since midnight on the day the
+    transaction occurred on
+    """
+    df["seconds_since_midnight"] = (
+        df["timestamp"].dt.hour * 3600 +  # Convert hours to seconds
+        df["timestamp"].dt.minute * 60 +  # Convert minutes to seconds
+        df["timestamp"].dt.second         # Keep seconds
+    )
+    return df
+
+
+def add_sent_amount_usd(df: pd.DataFrame, usd_conversion: dict) -> pd.DataFrame:
+    """Adds the `sent_amount_usd` feature, which is the sent amount
+    converted to USD
+    """
+    df["sent_amount_usd"] = df.apply(
+        lambda row: row["sent_amount"] * usd_conversion.get(row["sent_currency"], 1),
         axis=1,
     )
     return df

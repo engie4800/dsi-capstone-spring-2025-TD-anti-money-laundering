@@ -39,9 +39,15 @@ from helpers.currency import get_usd_conversion
 from model import GINe
 from model.features import (
     add_currency_changed,
+    add_day_of_week,
+    add_hour_of_day,
+    add_is_weekend,
     add_received_amount_usd,
+    add_seconds_since_midnight,
     add_sent_amount_usd,
     add_time_diff_from,
+    add_timestamp_int,
+    add_timestamp_scaled,
     add_turnaround_time,
 )
 from pipeline.checks import Checker
@@ -177,23 +183,17 @@ class ModelPipeline:
         logging.info("Extracting time features...")
         Checker.timestamp_required(self)
 
+        # Ensures `timestamp` is a `datetime` object
         if not isinstance(self.df["timestamp"], datetime.datetime):
             self.df["timestamp"] = pd.to_datetime(self.df["timestamp"])
 
-        # Extract items from timestamp
-        self.df["hour_of_day"] = self.df["timestamp"].dt.hour
-        self.df["day_of_week"] = self.df["timestamp"].dt.weekday  # 0=Monday,...,6=Sunday
-        self.df["seconds_since_midnight"] = (
-            self.df["timestamp"].dt.hour * 3600 +  # Convert hours to seconds
-            self.df["timestamp"].dt.minute * 60 +  # Convert minutes to seconds
-            self.df["timestamp"].dt.second         # Keep seconds
-        )
-
-        # Transform timestamp to raw int unix
-        self.df["timestamp_int"] = self.df["timestamp"].astype("int64") / 10**9
-
-        # Just a temp assignment of raw int unix, will be scaled later on
-        self.df["timestamp_scaled"] = self.df["timestamp"].astype("int64") / 10**9
+        # Add each time feature
+        self.df = add_hour_of_day(self.df)
+        self.df = add_day_of_week(self.df)
+        self.df = add_seconds_since_midnight(self.df)
+        self.df = add_is_weekend(self.df)
+        self.df = add_timestamp_int(self.df)
+        self.df = add_timestamp_scaled(self.df)
 
         # Dropping timestamp ensures that the complex timestamp string
         # itself isn't used as a feature, as it is poorly suited to be
@@ -323,20 +323,11 @@ class ModelPipeline:
         # (in this case) are now represented cyclically. Should we
         # consider:
         #
-        #   1. Including the binary weekend feature as an extracted
-        #      time feature
-        #   2. Remove `binary_weekend()` method
-        #   3. Here, remove the `day_of_week` and
-        #      `seconds_since_midnight` features, as they are now
-        #      represented in the cyclical features?
+        #   Removing the `day_of_week` and `seconds_since_midnight`
+        #   features, as they are now represented in the cyclical features?
         #
         
         self.preprocessed["cyclical_encoded"] = True
-        
-    def binary_weekend(self):
-        Checker.time_features_were_extracted(self)
-        self.df["is_weekend"] = self.df["day_of_week"].isin([5, 6]).astype(int)
-        self.preprocessed["weekend_encoded"] = True
     
     def apply_one_hot_encoding(self, onehot_categorical_features= None):
         """One hot encode categorical columns, handling related columns"""
