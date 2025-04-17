@@ -838,7 +838,15 @@ class ModelPipeline:
             return col_series, median_val
 
         if cols_to_scale is None:
-            breakpoint()
+            # Default to scaling all columns, except for the index and
+            # graph features with specific definitions
+            cols_to_scale = list(set(self.train_nodes.columns) - set([
+                "node_id",
+                "degree_centrality",
+                "in_degree",
+                "out_degree",
+                "pagerank",
+            ]))
 
         train_nodes = self.train_nodes.copy()
         val_nodes = self.val_nodes.copy()
