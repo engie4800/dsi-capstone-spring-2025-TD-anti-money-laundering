@@ -32,3 +32,11 @@ class Checker:
             raise RuntimeError(
                 "This method must be run after extracting time features."
             )
+
+    def unique_ids_were_created(pipeline: "ModelPipeline") -> None:
+        if not pipeline.preprocessed["unique_ids_created"]:
+            raise RuntimeError(
+                "This method requires each financial entity (each "
+                "distinct  bank, account pair) to have a unique "
+                "identifier."
+            )

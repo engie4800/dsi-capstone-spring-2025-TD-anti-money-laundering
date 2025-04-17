@@ -37,6 +37,7 @@ from tqdm import tqdm
 
 from helpers.currency import get_usd_conversion
 from model import GINe
+from model.features import add_turnaround_time
 from pipeline.checks import Checker
 
 
@@ -290,73 +291,72 @@ class ModelPipeline:
 
         self.preprocessed["unique_ids_created"] = True
 
-    def get_turnaround_time(self):
-        """
-        Keep track of last received timestamp per account
-        """
-        last_received_time = {}
-        turnaround_times = []
-        for _, row in self.df.iterrows():
-            from_id = row["from_account_idx"]
-            to_id = row["to_account_idx"]
-            timestamp = row["timestamp_int"]
-
-            # Compute turnaround if account had received money earlier
-            turnaround_time = timestamp - last_received_time.get(from_id, np.nan)
-            turnaround_times.append(turnaround_time)
-
-            # Update last received time for the destination
-            last_received_time[to_id] = timestamp
-
-        self.df["turnaround_time"] = turnaround_times
-        self.df["turnaround_time"] = self.df["turnaround_time"].fillna(-1)  # optional
-
     def extract_additional_time_features(self):
-        """
-        Additional time features can be extracted after creating unique
-        IDs, which depends on the initial time feature extraction
+        """Additional time features can be extracted after creating
+        unique identifiers, which depends on the initial time feature
+        extraction. This method adds:
+
+            time_diff_from: The time since the sender in a given
+                transaction previously sent money
         """
         logging.info("Extracting additional time features...")
-        if not self.preprocessed["unique_ids_created"]:
-            raise RuntimeError(
-                "Unique IDs must be created before extracting "
-                "additional time features."
-            )
+        Checker.time_features_were_extracted(self)
+        Checker.unique_ids_were_created(self)
 
         # Ensures data is sorted by timestamp
         self.df = self.df.sort_values(
             by=["from_account_idx", "timestamp_int"]
         ).reset_index(drop=True)
 
-        # Group by account and compute time difference from previous transaction
+        # Group by from account and compute time difference from
+        # previous transaction.
+        # TODO: does it make sense to add a `time_diff_to` and if not
+        # why not?
         self.df["time_diff_from"] = self.df.groupby("from_account_idx")["timestamp_int"].diff()
         self.df["time_diff_from"] = self.df["time_diff_from"].fillna(-1)
 
-        # Sort by 'edge_id', which is how the dataframe is sorted prior
-        # to calling 'extract_additional_time_features'
+        # Sort by `edge_id`, which is how the dataframe is sorted prior
+        # to calling `extract_additional_time_features`
         self.df = self.df.sort_values(by="edge_id").reset_index(drop=True)
 
-        # Extract turnaround time, too
-        self.get_turnaround_time()
+        # Add the `turnaround_time` feature
+        self.df = add_turnaround_time(self.df)
 
         self.preprocessed["additional_time_features_extracted"] = True
         
     def cyclical_encoding(self):
-        logging.info("Adding cyclical encoding to time feats...")
-        
-        if not self.preprocessed["time_features_extracted"]:
-            raise RuntimeError("Time features missing, run `extract_time_features` first.")
+        """Adds cyclically-encoded time features. Some time features,
+        like the day of week or time of day, contain an inherent
+        discontinuity near zero. That is, values close to zero and
+        values close to the max value appear as far apart as possible,
+        but are actually very close (consider seconds before and
+        seconds after midnight). Encoding these features removes this
+        discontinuity.
+        """
+        logging.info("Adding cyclical encoding to time features...")
+        Checker.time_features_were_extracted(self)
         
         self.df["day_sin"] = np.sin(2 * np.pi * self.df["day_of_week"] / 7)
         self.df["day_cos"] = np.cos(2 * np.pi * self.df["day_of_week"] / 7)
         self.df["time_of_day_sin"] = np.sin(2 * np.pi * self.df["seconds_since_midnight"] / 86400)
         self.df["time_of_day_cos"] = np.cos(2 * np.pi * self.df["seconds_since_midnight"] / 86400)
+
+        # TODO: the `day_of_week` and `seconds_since_midnight` features
+        # (in this case) are now represented cyclically. Should we
+        # consider:
+        #
+        #   1. Including the binary weekend feature as an extracted
+        #      time feature
+        #   2. Remove `binary_weekend()` method
+        #   3. Here, remove the `day_of_week` and
+        #      `seconds_since_midnight` features, as they are now
+        #      represented in the cyclical features?
+        #
         
         self.preprocessed["cyclical_encoded"] = True
         
     def binary_weekend(self):
-        if "day_of_week" not in self.df.columns:
-            raise KeyError("Day-of-week feature missing. Run `extract_time_features` first.")
+        Checker.time_features_were_extracted(self)
         self.df["is_weekend"] = self.df["day_of_week"].isin([5, 6]).astype(int)
         self.preprocessed["weekend_encoded"] = True
     
