@@ -221,7 +221,7 @@ def cyclically_encode_feature(
     ask for a `source_feature`, but this consistency is missing from
     legacy feature naming
     """
-    scale = df[feature].max()
+    scale = df[source_feature].max()
     df[f"{feature}_cos"] = np.cos(2 * np.pi * df[source_feature] / scale)
     df[f"{feature}_sin"] = np.sin(2 * np.pi * df[source_feature] / scale)
     return df
