@@ -35,6 +35,7 @@ from model.features import (
     add_timestamp_int,
     add_timestamp_scaled,
     add_turnaround_time,
+    add_unique_identifiers,
 )
 from pipeline.checks import Checker
 
@@ -208,61 +209,7 @@ class ModelPipeline:
         logging.info("Creating unique ids...")
         Checker.columns_were_renamed(self)
         Checker.time_features_were_extracted(self)
-
-        # Sort transactions by timestamp
-        self.df = self.df.sort_values(by="timestamp_int").reset_index(drop=True)
-
-        # Each row is an edge in the transaction graph; make this
-        # identification explicit
-        self.df["edge_id"] = self.df.index.astype(int)
-
-        # A separate analysis showed that account numbers were not
-        # unique between banks, especially for larger datasets. This
-        # account identifier ensures uniqueness by including the
-        # bank as well
-        self.df["from_account_id"] = (
-            self.df["from_bank"].astype(str)
-            + "_"
-            + self.df["from_account"].astype(str)
-        )
-        self.df["to_account_id"] = (
-            self.df["to_bank"].astype(str)
-            + "_"
-            + self.df["to_account"].astype(str)
-        )
-
-        # Combine all accounts in the order they appear, then sort by
-        # transaction ID which reflects temporal ordering
-        accounts_ordered = pd.concat([
-            self.df[["edge_id", "from_account_id"]].rename(columns={"from_account_id": "account_id"}),
-            self.df[["edge_id", "to_account_id"]].rename(columns={"to_account_id": "account_id"})
-        ])
-        accounts_ordered = accounts_ordered.sort_values(by="edge_id")
-
-        # Drop duplicates to get first-seen ordering of accounts
-        unique_accounts = accounts_ordered\
-            .drop_duplicates(subset="account_id")["account_id"]\
-            .reset_index(drop=True)
-
-        # Create mapping: account_id → index based on first appearance
-        node_mapping = {account: idx for idx, account in enumerate(unique_accounts)}
-
-        # Map node identifiers to integer indices
-        self.df["from_account_idx"] = self.df["from_account_id"].map(node_mapping)
-        self.df["to_account_idx"] = self.df["to_account_id"].map(node_mapping)
-
-        # Drop the intermediate fields to ensure they aren't used by
-        # accident in training or elsewhere
-        self.df.drop(
-            columns=[
-                "from_account_id",
-                "to_account_id",
-                "from_account",
-                "to_account",
-            ],
-            inplace=True,
-        )
-
+        self.df = add_unique_identifiers(self.df)
         self.preprocessed["unique_ids_created"] = True
 
     def extract_additional_time_features(self):
@@ -715,7 +662,6 @@ class ModelPipeline:
         # This assumes we should just always get (and attach to the
         # pipeline) the split indices
         self.get_split_indices()
-        breakpoint()
 
         return self.X_train, self.X_val, self.X_test, self.y_train, self.y_val, self.y_test
 
@@ -824,6 +770,7 @@ class ModelPipeline:
             split_name="test",
             graph_features=graph_features
         )
+        breakpoint()
 
         self.preprocessed["post_split_node_features"] = True
 

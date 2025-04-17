@@ -144,3 +144,65 @@ def add_turnaround_time(df: pd.DataFrame) -> pd.DataFrame:
     df["turnaround_time"] = df["turnaround_time"].fillna(-1)
 
     return df
+
+
+def add_unique_identifiers(df: pd.DataFrame) -> pd.DataFrame:
+    """Adds unique node and edge (account and transaction) identifiers;
+    these need to be added together to ensure consistent ordering
+    between from and to account identifiers
+    """
+    # Ensure that transactions are sorted by timestamp
+    df = df.sort_values(by="timestamp_int").reset_index(drop=True)
+
+    # Each row is an edge in the transaction graph; make this
+    # identification explicit
+    df["edge_id"] = df.index.astype(int)
+
+    # A separate analysis showed that account numbers were not
+    # unique between banks, especially for larger datasets. This
+    # account identifier ensures uniqueness by including the
+    # bank as well
+    df["from_account_id"] = (
+        df["from_bank"].astype(str)
+        + "_"
+        + df["from_account"].astype(str)
+    )
+    df["to_account_id"] = (
+        df["to_bank"].astype(str)
+        + "_"
+        + df["to_account"].astype(str)
+    )
+
+    # Combine all accounts in the order they appear, then sort by
+    # `edge_id` which reflects temporal ordering
+    accounts_ordered = pd.concat([
+        df[["edge_id", "from_account_id"]].rename(columns={"from_account_id": "account_id"}),
+        df[["edge_id", "to_account_id"]].rename(columns={"to_account_id": "account_id"})
+    ])
+    accounts_ordered = accounts_ordered.sort_values(by="edge_id")
+
+    # Drop duplicates to get the set of accounts with a first-seen order
+    unique_accounts = accounts_ordered\
+        .drop_duplicates(subset="account_id")["account_id"]\
+        .reset_index(drop=True)
+
+    # Create mapping: account_id → index based on first appearance
+    node_mapping = {account: idx for idx, account in enumerate(unique_accounts)}
+
+    # Map node identifiers to integer indices
+    df["from_account_idx"] = df["from_account_id"].map(node_mapping)
+    df["to_account_idx"] = df["to_account_id"].map(node_mapping)
+
+    # Drop the intermediate fields to ensure they aren't used by
+    # accident in training or elsewhere
+    df.drop(
+        columns=[
+            "from_account_id",
+            "to_account_id",
+            "from_account",
+            "to_account",
+        ],
+        inplace=True,
+    )
+
+    return df
