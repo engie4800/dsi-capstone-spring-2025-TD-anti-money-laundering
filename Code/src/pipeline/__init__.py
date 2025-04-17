@@ -883,16 +883,13 @@ class ModelPipeline:
 
     def split_train_test_val_graph(self, edge_features=None):
         logging.info("Splitting into train, test, validation graphs")
-        if not self.preprocessed["post_split_node_features"]:
-            raise RuntimeError(
-                "Train, test, validation graph split assumes that post-"
-                "split node features have been added."
-            )
+        Checker.train_val_test_node_features_added(self)
 
         # A default set of edge features that excludes some obvious
         # features we don't want
         if edge_features is None:
             edge_features = self.X_cols  # TODO: any reason not to do this?
+            breakpoint()
 
         # Nodes
         tr_x = torch.tensor(self.train_nodes.drop(columns="node_id").values, dtype=torch.float)
