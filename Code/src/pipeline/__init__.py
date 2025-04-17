@@ -888,8 +888,45 @@ class ModelPipeline:
         # A default set of edge features that excludes some obvious
         # features we don't want
         if edge_features is None:
-            edge_features = self.X_cols  # TODO: any reason not to do this?
-            breakpoint()
+            # TODO: any reason not to do this?
+            # edge_features = self.X_cols
+            # For now, the features defined in the latest baseline:
+            edge_features = [
+                "edge_id",
+                "sent_amount_usd",
+                "received_amount_usd",
+                "timestamp_scaled",
+                "time_diff_from",
+                "turnaround_time",
+                "day_sin",
+                "day_cos",
+                "time_of_day_sin",
+                "time_of_day_cos",
+                "payment_type_ACH",
+                "currency_changed",
+                "received_currency_Australian Dollar",
+                "received_currency_Brazil Real",
+                "received_currency_Canadian Dollar",
+                "received_currency_Euro",
+                "received_currency_Mexican Peso",
+                "received_currency_Ruble",
+                "received_currency_Saudi Riyal",
+                "received_currency_Shekel",
+                "received_currency_Swiss Franc",
+                "received_currency_UK Pound",
+                "received_currency_US Dollar",
+                "received_currency_Yuan",
+                "sent_currency_Canadian Dollar",
+                "sent_currency_Euro",
+                "sent_currency_Mexican Peso",
+                "sent_currency_Rupee",
+                "sent_currency_Saudi Riyal",
+                "sent_currency_Shekel",
+                "sent_currency_Swiss Franc",
+                "sent_currency_UK Pound",
+                "sent_currency_US Dollar",
+                "sent_currency_Yuan",
+            ]
 
         # Nodes
         tr_x = torch.tensor(self.train_nodes.drop(columns="node_id").values, dtype=torch.float)
@@ -905,11 +942,7 @@ class ModelPipeline:
         # Edge attr
         edge_attr = torch.tensor(self.df[edge_features].to_numpy(), dtype=torch.float)
 
-
         # Overwrites the values we got from the original split
-        # TODO: Do we need to keep both?
-        self.t1 = torch.tensor(self.t1)
-        self.t2 = torch.tensor(self.t2)
         self.train_indices = torch.tensor(self.train_indices)
         self.val_indices = torch.tensor(self.val_indices)
         self.test_indices = torch.tensor(self.test_indices)
