@@ -248,8 +248,8 @@ class ModelPipeline:
         """
         logging.info("Adding cyclical encoding to time features...")
         Checker.time_features_were_extracted(self)
-        self.df = cyclically_encode_feature(self.df, "day_of_week", "day")
-        self.df = cyclically_encode_feature(self.df, "seconds_since_midnight", "time_of_day")
+        self.df = cyclically_encode_feature(self.df, "day", "day_of_week")
+        self.df = cyclically_encode_feature(self.df, "time_of_day", "seconds_since_midnight")
 
         # TODO: the `day_of_week` and `seconds_since_midnight` features
         # (in this case) are now represented cyclically. Should we
