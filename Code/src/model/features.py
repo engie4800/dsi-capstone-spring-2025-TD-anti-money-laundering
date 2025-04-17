@@ -12,6 +12,16 @@ import numpy as np
 import pandas as pd
 
 
+def add_currency_changed(df: pd.DataFrame) -> pd.DataFrame:
+    """Adds the `currency_changed` feature, which is an indicator of
+    whether the currency changes within each transaction
+    """
+    df["currency_changed"] = (
+        df["sent_currency"] != df["received_currency"]
+    ).astype(int)
+    return df
+
+
 def add_sent_amount_usd(df: pd.DataFrame, usd_conversion: dict) -> pd.DataFrame:
     """Adds the `sent_amount_usd` feature, which is the sent amount
     converted to USD

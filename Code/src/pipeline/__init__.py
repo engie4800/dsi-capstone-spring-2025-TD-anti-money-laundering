@@ -38,9 +38,10 @@ from tqdm import tqdm
 from helpers.currency import get_usd_conversion
 from model import GINe
 from model.features import (
-    add_turnaround_time,
+    add_currency_changed,
     add_received_amount_usd,
     add_sent_amount_usd,
+    add_turnaround_time,
 )
 from pipeline.checks import Checker
 
@@ -60,10 +61,9 @@ class ModelPipeline:
             "renamed": False,
             "duplicates_removed": False,
             "checked_for_null_values": False,
-            "unique_ids_created": False,
-            "currency_normalized": False,
             "currency_features_extracted": False,
             "time_features_extracted": False,
+            "unique_ids_created": False,
             "additional_time_features_extracted": False,
             "cyclical_encoded": False,
             "weekend_encoded": False,
@@ -141,33 +141,23 @@ class ModelPipeline:
             )
         self.preprocessed["checked_for_null_values"] = True
 
-    def currency_normalization(self) -> None:
-        """
-        Adds sent and received amounts in USD to each transaction,
-        which shouldn't add information to the set of edge features,
-        but which can be used on aggregated node features
-        """
-        logging.info("Normalizing currency...")
-        Checker.currency_columns_required(self)
-        usd_conversion = get_usd_conversion(self.dataset_path)
-        self.df = add_sent_amount_usd(self.df, usd_conversion)
-        self.df = add_received_amount_usd(self.df, usd_conversion)
-        self.preprocessed["currency_normalized"] = True
-
     def extract_currency_features(self) -> None:
         """
         Extract all currency-related features
 
             currency_changed: Whether the money in the transaction
                 changes currency from sender to receiver
+            add_sent_amount_usd: Sent amount in USD
+            add_received_amount_usd: Received amount in USD
 
         """
         logging.info("Extracting currency features...")
         Checker.currency_columns_required(self)
 
-        self.df["currency_changed"] = (
-            self.df["sent_currency"] != self.df["received_currency"]
-        ).astype(int)
+        self.df = add_currency_changed(self.df)
+        usd_conversion = get_usd_conversion(self.dataset_path)
+        self.df = add_sent_amount_usd(self.df, usd_conversion)
+        self.df = add_received_amount_usd(self.df, usd_conversion)
 
         self.preprocessed["currency_features_extracted"] = True
 
@@ -604,7 +594,6 @@ class ModelPipeline:
             self.rename_columns()
             self.drop_duplicates()
             self.check_for_null()
-            self.currency_normalization()
             self.extract_currency_features()
             self.extract_time_features()
             self.cyclical_encoding()
