@@ -287,7 +287,7 @@ class ModelPipeline:
         self.df = add_turnaround_time(self.df)
 
         self.preprocessed["additional_time_features_extracted"] = True
-        
+
     def cyclical_encoding(self):
         """Adds cyclically-encoded time features. Some time features,
         like the day of week or time of day, contain an inherent
@@ -314,7 +314,7 @@ class ModelPipeline:
         #
         
         self.preprocessed["cyclical_encoded"] = True
-    
+
     def apply_one_hot_encoding(self, onehot_categorical_features=None):
         """One hot encode categorical columns, handling related columns"""
         logging.info("Applying one hot encoding...")
@@ -715,6 +715,7 @@ class ModelPipeline:
         # This assumes we should just always get (and attach to the
         # pipeline) the split indices
         self.get_split_indices()
+        breakpoint()
 
         return self.X_train, self.X_val, self.X_test, self.y_train, self.y_val, self.y_test
 
