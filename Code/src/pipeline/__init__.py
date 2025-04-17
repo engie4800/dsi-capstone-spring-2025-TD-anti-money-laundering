@@ -41,6 +41,7 @@ from model.features import (
     add_currency_changed,
     add_received_amount_usd,
     add_sent_amount_usd,
+    add_time_diff_from,
     add_turnaround_time,
 )
 from pipeline.checks import Checker
@@ -285,28 +286,18 @@ class ModelPipeline:
 
             time_diff_from: The time since the sender in a given
                 transaction previously sent money
+            turnaround_time: The time elapsed since the sender in a
+                given transaction previously received money
+
         """
         logging.info("Extracting additional time features...")
         Checker.time_features_were_extracted(self)
         Checker.unique_ids_were_created(self)
 
-        # Ensures data is sorted by timestamp
-        self.df = self.df.sort_values(
-            by=["from_account_idx", "timestamp_int"]
-        ).reset_index(drop=True)
-
-        # Group by from account and compute time difference from
-        # previous transaction.
-        # TODO: does it make sense to add a `time_diff_to` and if not
-        # why not?
-        self.df["time_diff_from"] = self.df.groupby("from_account_idx")["timestamp_int"].diff()
-        self.df["time_diff_from"] = self.df["time_diff_from"].fillna(-1)
-
-        # Sort by `edge_id`, which is how the dataframe is sorted prior
-        # to calling `extract_additional_time_features`
-        self.df = self.df.sort_values(by="edge_id").reset_index(drop=True)
-
-        # Add the `turnaround_time` feature
+        # TODO: does it make sense to add an analogous `time_diff_to`
+        # representing the time since the receiver in a transaction
+        # previously received money?
+        self.df = add_time_diff_from(self.df)
         self.df = add_turnaround_time(self.df)
 
         self.preprocessed["additional_time_features_extracted"] = True

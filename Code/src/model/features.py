@@ -44,6 +44,27 @@ def add_received_amount_usd(df: pd.DataFrame, usd_conversion: dict) -> pd.DataFr
     return df
 
 
+def add_time_diff_from(df: pd.DataFrame) -> pd.DataFrame:
+    """Adds the `time_diff_from` feature, which is the time elapsed
+    since the sender in a given transaction previously sent money
+    """
+    # Ensures data is sorted by timestamp
+    df = df.sort_values(
+        by=["from_account_idx", "timestamp_int"]
+    ).reset_index(drop=True)
+
+    # Computes the `time_diff_from`, replacing `nan` values with `-1`
+    # to represent missing values
+    df["time_diff_from"] = df.groupby("from_account_idx")["timestamp_int"].diff()
+    df["time_diff_from"] = df["time_diff_from"].fillna(-1)
+
+    # Sort by `edge_id`, which is how the dataframe should have been
+    # sorted prior to adding this feature
+    df = df.sort_values(by="edge_id").reset_index(drop=True)
+
+    return df
+
+
 def add_turnaround_time(df: pd.DataFrame) -> pd.DataFrame:
     """Adds the `turnaround_time` feature, which is the time elapsed
     since the sender in a given transaction has received money
