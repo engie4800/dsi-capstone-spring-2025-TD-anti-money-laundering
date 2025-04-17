@@ -36,6 +36,7 @@ from model.features import (
     add_timestamp_scaled,
     add_turnaround_time,
     add_unique_identifiers,
+    cyclically_encode_feature
 )
 from pipeline.checks import Checker
 
@@ -156,7 +157,7 @@ class ModelPipeline:
 
         self.preprocessed["currency_features_extracted"] = True
 
-    def extract_time_features(self):
+    def extract_time_features(self) -> None:
         """
         Extract initial time-related features
 
@@ -190,7 +191,7 @@ class ModelPipeline:
         
         self.preprocessed["time_features_extracted"] = True
 
-    def create_unique_ids(self):
+    def create_unique_ids(self) -> None:
         """Create a mapping from bank, account pairs, each of which
         should be unique, to a unique identifier. This adds the
         following data to each transaction:
@@ -213,7 +214,7 @@ class ModelPipeline:
         self.df = add_unique_identifiers(self.df)
         self.preprocessed["unique_ids_created"] = True
 
-    def extract_additional_time_features(self):
+    def extract_additional_time_features(self) -> None:
         """Additional time features can be extracted after creating
         unique identifiers, which depends on the initial time feature
         extraction. This method adds:
@@ -247,11 +248,8 @@ class ModelPipeline:
         """
         logging.info("Adding cyclical encoding to time features...")
         Checker.time_features_were_extracted(self)
-        
-        self.df["day_sin"] = np.sin(2 * np.pi * self.df["day_of_week"] / 7)
-        self.df["day_cos"] = np.cos(2 * np.pi * self.df["day_of_week"] / 7)
-        self.df["time_of_day_sin"] = np.sin(2 * np.pi * self.df["seconds_since_midnight"] / 86400)
-        self.df["time_of_day_cos"] = np.cos(2 * np.pi * self.df["seconds_since_midnight"] / 86400)
+        self.df = cyclically_encode_feature(self.df, "day_of_week", "day")
+        self.df = cyclically_encode_feature(self.df, "seconds_since_midnight", "time_of_day")
 
         # TODO: the `day_of_week` and `seconds_since_midnight` features
         # (in this case) are now represented cyclically. Should we
@@ -982,15 +980,7 @@ class ModelPipeline:
 
     def get_data_loaders(self, num_neighbors=[100,100], batch_size=8192):
         logging.info("Getting data loaders")
-        if not self.preprocessed["train_test_val_data_split_graph"]:
-            raise RuntimeError(
-                "Cannot get data loaders for GNN until the graph train-"
-                "test split is complete."
-            )
-
-        # TODO: might be able to move this to somewhere more meaningful,
-        # but it is needed here at the latest
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        Checker.graph_data_split_to_train_val_test(self)
 
         def scale_data(data, cols_to_scale, device):
 
@@ -1015,8 +1005,11 @@ class ModelPipeline:
             data.y = data.y.to(device)
             return data
 
+        # TODO: might be able to move this to somewhere more meaningful,
+        # but it is needed here at the latest
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
         # Standard scale on CPU before sending to device
-        # TODO: does it make sense to overwrite data here?
         self.train_data = scale_data(self.train_data, [1, 2, 3, 4, 5], self.device)
         self.val_data = scale_data(self.val_data, [1, 2, 3, 4, 5], self.device)
         self.test_data = scale_data(self.test_data, [1, 2, 3, 4, 5], self.device)
@@ -1059,7 +1052,7 @@ class ModelPipeline:
             self.test_data,
         )
 
-    def initialize_training(self):
+    def initialize_training(self) -> None:
         # TODO: does it make sense to attach this, as well as well as
         # the evaluate and train functions, onto the model pipeline?
 
@@ -1075,9 +1068,10 @@ class ModelPipeline:
             verbose=True
         )
 
-        pos = (self.df["is_laundering"] == 1).sum()
-        neg = (self.df["is_laundering"] == 0).sum()
-        pos_weight_val = 6  # neg / pos
+        # pos = (self.df["is_laundering"] == 1).sum()
+        # neg = (self.df["is_laundering"] == 0).sum()
+        # pos_weight_val = neg / pos
+        pos_weight_val = 6
         self.criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight_val], device=self.device))
 
     @torch.no_grad()

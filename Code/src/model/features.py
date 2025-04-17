@@ -206,3 +206,33 @@ def add_unique_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     return df
+
+
+def cyclically_encode_feature(
+    df: pd.DataFrame,
+    feature: str,
+    source_feature: str,
+) -> pd.DataFrame:
+    """Cyclically encodes the given feature by both sine and cosine.
+    The scale is the max of the data, assuming that data that needs to
+    be cyclically encoded has a range of [0, max].
+
+    Note that it would be more consistent to just use `source` and not
+    ask for a `source_feature`, but this consistency is missing from
+    legacy feature naming
+    """
+    scale = df[feature].max()
+    df[f"{feature}_cos"] = np.cos(2 * np.pi * df[source_feature] / scale)
+    df[f"{feature}_sin"] = np.sin(2 * np.pi * df[source_feature] / scale)
+    return df
+
+
+
+def add_day_cos(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    """
+    df[feature]
+    df["day_cos"] = np.cos(2 * np.pi * df["day_of_week"] / 7)
+    df["day_sin"] = np.sin(2 * np.pi * df["day_of_week"] / 7)
+    df["time_of_day_cos"] = np.cos(2 * np.pi * df["seconds_since_midnight"] / 86400)
+    df["time_of_day_sin"] = np.sin(2 * np.pi * df["seconds_since_midnight"] / 86400)
