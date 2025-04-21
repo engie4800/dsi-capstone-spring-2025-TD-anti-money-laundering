@@ -11,16 +11,15 @@ let them only worry about adding features).
 import numpy as np
 import pandas as pd
 
-
-def add_currency_changed(df: pd.DataFrame) -> pd.DataFrame:
-    """Adds the `currency_changed` feature, which is an indicator of
-    whether the currency changes within each transaction
+def add_currency_exchange(df: pd.DataFrame) -> pd.DataFrame:
+    """Add `log_exchange_rate` feature, which is log(sent/received) 
+    and is an indicator of way of currency conversion (to lower or higher-val currency).
+    Log functions as stabilizer to clip extreme vals.
     """
-    df["currency_changed"] = (
-        df["sent_currency"] != df["received_currency"]
-    ).astype(int)
+    df['exchange_rate'] = abs(df['sent_amount']/df['received_amount'])
+    df['log_exchange_rate'] = np.log1p(df['exchange_rate']).clip(0,1000)
+    df.drop(columns='exchange_rate',inplace=True)
     return df
-
 
 def add_day_of_week(df: pd.DataFrame) -> pd.DataFrame:
     """Adds the `day_of_week` feature, which is an integer representing

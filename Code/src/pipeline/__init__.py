@@ -24,7 +24,7 @@ from tqdm import tqdm
 from helpers.currency import get_usd_conversion
 from model import GINe
 from model.features import (
-    add_currency_changed,
+    add_currency_exchange,
     add_day_of_week,
     add_hour_of_day,
     add_is_weekend,
@@ -141,8 +141,7 @@ class ModelPipeline:
         """
         Extract all currency-related features
 
-            currency_changed: Whether the money in the transaction
-                changes currency from sender to receiver
+            currency_exchange: exchange rate from sent to received
             add_sent_amount_usd: Sent amount in USD
             add_received_amount_usd: Received amount in USD
 
@@ -150,7 +149,7 @@ class ModelPipeline:
         logging.info("Extracting currency features...")
         Checker.currency_columns_required(self)
 
-        self.df = add_currency_changed(self.df)
+        self.df = add_currency_exchange(self.df)
         usd_conversion = get_usd_conversion(self.dataset_path)
         self.df = add_sent_amount_usd(self.df, usd_conversion)
         self.df = add_received_amount_usd(self.df, usd_conversion)
@@ -902,7 +901,7 @@ class ModelPipeline:
                 "time_of_day_sin",
                 "time_of_day_cos",
                 "payment_type_ACH",
-                "currency_changed",
+                "log_exchange_rate",
                 "received_currency_Australian Dollar",
                 "received_currency_Brazil Real",
                 "received_currency_Canadian Dollar",
