@@ -1,5 +1,4 @@
-"""
-Example usage:
+"""Example usage:
 
     > usd_conversion = get_usd_conversion("/path/to/LI-Large_Trans.csv")
     > print(usd_conversion)
