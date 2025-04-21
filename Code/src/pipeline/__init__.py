@@ -204,7 +204,7 @@ class ModelPipeline:
 
         # Encode grouped columns using shared encoder
         for suffix, cols in column_groups.items():
-            encoder = OneHotEncoder(sparse=False, handle_unknown='ignore')
+            encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
             unique_values = pd.concat([self.df[col] for col in cols], axis=0).drop_duplicates().to_frame()
             encoder.fit(unique_values)
 
@@ -218,7 +218,7 @@ class ModelPipeline:
         # Encode independent columns
         independent_cols = [col for col in categorical_features if col not in sum(column_groups.values(), [])]
         for col in independent_cols:
-            encoder = OneHotEncoder(sparse=False, handle_unknown='ignore')
+            encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
             transformed = encoder.fit_transform(self.df[[col]])
             ohe_cols = [f"{col}_{cat}" for cat in encoder.categories_[0]]
             encoded_df = pd.DataFrame(transformed, columns=ohe_cols, index=self.df.index)
