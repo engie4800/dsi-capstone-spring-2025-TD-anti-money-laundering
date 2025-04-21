@@ -21,6 +21,7 @@ def add_currency_exchange(df: pd.DataFrame) -> pd.DataFrame:
     df.drop(columns='exchange_rate',inplace=True)
     return df
 
+
 def add_day_of_week(df: pd.DataFrame) -> pd.DataFrame:
     """Adds the `day_of_week` feature, which is an integer representing
     which day of the week (0, 1, 2, ..., 6) the transaction occurs
@@ -111,6 +112,27 @@ def add_time_diff_from(df: pd.DataFrame) -> pd.DataFrame:
     # to represent missing values
     df["time_diff_from"] = df.groupby("from_account_idx")["timestamp_int"].diff()
     df["time_diff_from"] = df["time_diff_from"].fillna(-1)
+
+    # Sort by `edge_id`, which is how the dataframe should have been
+    # sorted prior to adding this feature
+    df = df.sort_values(by="edge_id").reset_index(drop=True)
+
+    return df
+
+
+def add_time_diff_to(df: pd.DataFrame) -> pd.DataFrame:
+    """Adds the `time_diff_to` feature, which is the time elapsed
+    since the receiver in a given transaction previously received money
+    """
+    # Ensures data is sorted by timestamp
+    df = df.sort_values(
+        by=["to_account_idx", "timestamp_int"]
+    ).reset_index(drop=True)
+
+    # Computes the `time_diff_from`, replacing `nan` values with `-1`
+    # to represent missing values
+    df["time_diff_to"] = df.groupby("to_account_idx")["timestamp_int"].diff()
+    df["time_diff_to"] = df["time_diff_to"].fillna(-1)
 
     # Sort by `edge_id`, which is how the dataframe should have been
     # sorted prior to adding this feature
