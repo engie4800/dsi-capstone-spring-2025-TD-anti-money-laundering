@@ -758,7 +758,7 @@ class ModelPipeline:
             out_stats = (
                 split_df.groupby("from_account_idx")["sent_amount_usd"]
                     .agg(["sum", "mean", "std"])
-                    .add_prefix("in_")
+                    .add_prefix("out_")
                     .reset_index()
                     .rename(columns={"from_account_idx": "node_id"})
             )
