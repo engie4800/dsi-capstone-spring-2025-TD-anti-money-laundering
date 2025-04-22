@@ -81,6 +81,7 @@ class GNNTrainer:
     """Trainer class for GINe-based Graph Neural Network using PyTorch Geometric and torchmetrics.
     Handles training, evaluation, early stopping, and metric logging.
     """
+    # TODO: make this easier so we can just pass in pl object, and it uses these things from pl? 
     def __init__(self, model, train_loader, val_loader, test_loader,
                  train_indices, val_indices, test_indices, df,
                  device ="cuda" if torch.cuda.is_available() else "cpu", 
