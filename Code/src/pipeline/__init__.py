@@ -487,6 +487,7 @@ class ModelPipeline:
         # Adding the new features to the main nodes dataframe
         self.nodes = pd.merge(self.nodes, temp_node_df, on="node_id", how="outer")
 
+    # TODO: do we need this anymore? Further, how can we ensure other method also allows for no node feats?
     def extract_nodes(self, node_features=None, graph_related_features=None):
         """Extract nodes (x) data that is used across splits"""
 
@@ -515,6 +516,7 @@ class ModelPipeline:
         if self.nodes.shape[1] == 1:
             self.nodes["placeholder"] = 1
 
+    # TODO: Do we need this anymore?
     def generate_tensors(self, edge_features, node_features=None, edges = ["from_account_idx", "to_account_idx"]):
         """Convert data to PyTorch tensor format for GNNs"""
         logging.info("Generating tensors...")
@@ -561,6 +563,8 @@ class ModelPipeline:
             self.binary_weekend()
             self.create_unique_ids()
             self.extract_additional_time_features()
+            # TODO: do we need label encoding any more? I thought we decided 
+            # not to include to/from bank as feature bc of high dimensionality
             self.apply_label_encoding()
             self.apply_one_hot_encoding()
             if graph_feats:
@@ -920,18 +924,11 @@ class ModelPipeline:
         Args:
             node_feat_cols (list or None): List of node feature columns to merge (excluding 'node_id').
                                         If None, will use all columns in node DataFrames except
-                                        a default exclusion set.
+                                        a "node_id"
         """
-        # Default exclusions (only drop if present)
-        default_exclude = {"node_id", "degree_centrality", "pagerank", "std_txn_in", "std_txn_out"}
-
-        def get_valid_node_cols(df):
-            return list(set(df.columns) - default_exclude)
 
         if node_feat_cols is None:
-            node_feat_cols = get_valid_node_cols(self.train_nodes)
-        else: # Only use features that actually exist in the train_nodes
-            node_feat_cols = [col for col in node_feat_cols if col in self.train_nodes.columns]
+            node_feat_cols = self.train_nodes.columns 
 
         def merge_feats(txns_df, nodes_df):
             if "node_id" not in nodes_df.columns:
@@ -971,53 +968,9 @@ class ModelPipeline:
         # features we don't want
         if edge_features is None:
             # TODO: any reason not to do this? 
-            # edge_features = self.X_cols
-            # Right now we may have a few less columns than are in X_cols... 
-            # For now, the features defined in the latest baseline:
-            self.edge_features = [
-                "edge_id",
-                "sent_amount_usd",
-                # "received_amount_usd",
-                "timestamp_scaled",
-                "time_diff_from",
-                'time_diff_to',
-                "turnaround_time",
-                "day_sin",
-                "day_cos",
-                "time_of_day_sin",
-                "time_of_day_cos",
-                "payment_type_ACH",
-                "payment_type_Wire",
-                "payment_type_Reinvestment",
-                "payment_type_Bitcoin", 
-                "payment_type_Cheque",
-                "payment_type_Credit Card",
-                "payment_type_Cash",
-                "log_exchange_rate",
-                "received_currency_Australian Dollar",
-                "received_currency_Brazil Real",
-                "received_currency_Canadian Dollar",
-                "received_currency_Euro",
-                "received_currency_Mexican Peso",
-                "received_currency_Ruble",
-                "received_currency_Saudi Riyal",
-                "received_currency_Shekel",
-                "received_currency_Swiss Franc",
-                "received_currency_UK Pound",
-                "received_currency_US Dollar",
-                "received_currency_Yuan",
-                "sent_currency_Canadian Dollar",
-                "sent_currency_Euro",
-                "sent_currency_Mexican Peso",
-                "sent_currency_Rupee",
-                "sent_currency_Saudi Riyal",
-                "sent_currency_Shekel",
-                "sent_currency_Swiss Franc",
-                "sent_currency_UK Pound",
-                "sent_currency_US Dollar",
-                "sent_currency_Yuan",
-            ]
-
+            self.edge_features = ['edge_id'] + [col for col in self.X_cols if col != 'edge_id'] 
+        else:
+            self.edge_features = edge_features
         # Nodes
         tr_x = torch.tensor(self.train_nodes.drop(columns="node_id").values, dtype=torch.float)
         val_x = torch.tensor(self.val_nodes.drop(columns="node_id").values, dtype=torch.float)
@@ -1058,7 +1011,8 @@ class ModelPipeline:
         )
 
         self.preprocessed["train_test_val_data_split_graph"] = True
-
+        
+        # TODO: again, do we need to return this stuff or nah
         return (
             self.train_indices,
             self.val_indices,
@@ -1076,16 +1030,30 @@ class ModelPipeline:
         Uses training set to fit scalers, then applies to all sets.
         """
         logging.info("Scaling edge features: %s", edge_features_to_scale)
+        
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
+        if edge_features_to_scale is None:
+            self.scaled_edge_features = [
+                "sent_amount_usd",
+                "timestamp_scaled",
+                "time_diff_from",
+                "time_diff_to",
+                "turnaround_time",
+            ]
+        else:
+            self.scaled_edge_features = edge_features_to_scale
+        
         scalers = {}
         train_edge_attr = self.train_data.edge_attr.cpu().numpy()
         val_edge_attr = self.val_data.edge_attr.cpu().numpy()
         test_edge_attr = self.test_data.edge_attr.cpu().numpy()
         
         # Map feature name to index
-        feature_idx_map = {name: i for i, name in enumerate(self.edge_feature_names)}
+        feature_idx_map = {name: i for i, name in enumerate(self.edge_features)}
 
-        for col_idx, feature in enumerate(edge_features_to_scale):
+        for feature in self.scaled_edge_features:
+            col_idx = feature_idx_map[feature] 
             train_vals = train_edge_attr[:, col_idx]
             mask = train_vals != -1
             if np.sum(mask) == 0:
@@ -1105,7 +1073,7 @@ class ModelPipeline:
                 edge_attr[:, col_idx] = scaler.transform(col.reshape(-1, 1)).flatten()
 
             train_edge_attr[:, col_idx] = train_scaled
-            scalers[feature] = scaler
+            scalers[feature] = scaler # TODO: do we need to return the scalars? why do we have this?
 
         self.train_data.edge_attr = torch.tensor(train_edge_attr, dtype=torch.float32, device=self.device)
         self.val_data.edge_attr = torch.tensor(val_edge_attr, dtype=torch.float32, device=self.device)
@@ -1121,21 +1089,6 @@ class ModelPipeline:
         # TODO: might be able to move this to somewhere more meaningful,
         # but it is needed here at the latest
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        edge_features_to_scale = [
-            "sent_amount_usd",
-            "received_amount_usd",
-            "timestamp_scaled",
-            "time_diff_from",
-            "time_diff_to",
-            "turnaround_time",
-        ]
-
-        # TODO: how to make sure that scaling happens properly and on the numeric cols we want to scale? 
-        # esp. if we drop any later? Maybe this neds to be moved into separate function for better specificiation
-
-        # Apply scaling only to selected edge features
-        self.scale_edge_features(edge_features_to_scale)
 
         self.train_loader = LinkNeighborLoader(
             data=self.train_data,
