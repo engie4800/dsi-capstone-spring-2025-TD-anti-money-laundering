@@ -1,5 +1,6 @@
 import datetime
 import logging
+from typing import TYPE_CHECKING
 
 import networkx as nx
 import numpy as np
@@ -10,6 +11,7 @@ from IPython.display import display
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
 from torch_geometric.data import Data
+from torch_geometric.explain import Explainer, GNNExplainer
 from torch_geometric.loader import LinkNeighborLoader
 from torch.optim import Adam
 from torchmetrics.classification import (
@@ -22,6 +24,7 @@ from torchmetrics.classification import (
 from tqdm import tqdm
 
 from helpers.currency import get_usd_conversion
+from helpers.graph import scale_graph_edge_attributes
 from model import GINe
 from model.features import (
     add_currency_changed,
@@ -40,6 +43,9 @@ from model.features import (
 )
 from pipeline.checks import Checker
 
+if TYPE_CHECKING:
+    from torch_geometric.explain import Explanation
+
 
 class ModelPipeline:
 
@@ -50,6 +56,9 @@ class ModelPipeline:
         self.dataset_path = dataset_path
         self.df = pd.read_csv(self.dataset_path)
         self.nodes = pd.DataFrame()
+
+        # Which device will model computation occur on?
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         # Track if preprocessing steps have been completed
         self.preprocessed = {
@@ -103,7 +112,7 @@ class ModelPipeline:
             "Is Laundering": "is_laundering",
         }
 
-        # Ensure required columns exist
+        # Ensures required columns exist
         missing_columns = [
             col
             for col in column_mapping.keys()
@@ -456,12 +465,7 @@ class ModelPipeline:
 
     def extract_nodes(self, node_features=None, graph_related_features=None):
         """Extract nodes (x) data that is used across splits"""
-
-        # Ensure that unique_ids have been generated
-        if not self.preprocessed["unique_ids_created"]:
-            raise RuntimeError(
-                "Unique account IDs must be created before computing network features"
-            )
+        Checker.unique_ids_were_created(self)
 
         logging.info("Extracting nodes...")
 
@@ -625,8 +629,7 @@ class ModelPipeline:
             )
 
         elif self.split_type == "temporal":
-            if "timestamp_int" not in self.df.columns:
-                raise RuntimeError("Need `timestamp_int` in df for temporal split. Review preprocessing steps.")
+            Checker.time_features_were_extracted(self)  # timestamp_int required
 
             # Sort by time and find indices for data split
             df_sorted = self.df.sort_values(by=["timestamp_int"])
@@ -641,11 +644,8 @@ class ModelPipeline:
             self.X_test, self.y_test = X[t2:], y[t2:]
 
         elif self.split_type == "temporal_agg":
-            if "timestamp_int" not in self.df.columns:
-                raise RuntimeError("Must include timestamp_int in df for temporal split")
-
-            if "edge_id" not in self.df.columns:
-                raise RuntimeError("Must include edge_id in df for temporal split")
+            Checker.time_features_were_extracted(self)  # timestamp_int required
+            Checker.unique_ids_were_created(self)  # edge_id required
 
             # Sort by time and find indices for data split
             X = self.df[self.X_cols]
@@ -678,11 +678,7 @@ class ModelPipeline:
         Returns numpy arrays of appropriate indices based on validation
         and test sizes
         """
-        if not self.preprocessed["train_test_val_data_split"]:
-            raise RuntimeError(
-                "Data must have been split into train, test, validation "
-                "sets before getting split indices."
-            )
+        Checker.data_split_to_train_val_test(self)
 
         num_edges = len(self.df)
 
@@ -803,6 +799,11 @@ class ModelPipeline:
             print(f"✅ Computed node features for {split_name} with {len(node_df)} nodes.")
             return node_df
 
+        self.nodes = get_node_features(
+            split_df=self.df,
+            split_name="all",
+            graph_features=graph_features,
+        )
         self.train_nodes = get_node_features(
             split_df=self.df.loc[self.train_indices, :],
             split_name="train",
@@ -846,6 +847,7 @@ class ModelPipeline:
                 "pagerank",
             ]))
 
+        nodes = self.nodes.copy()
         train_nodes = self.train_nodes.copy()
         val_nodes = self.val_nodes.copy()
         test_nodes = self.test_nodes.copy()
@@ -853,6 +855,7 @@ class ModelPipeline:
         scalers = {}
 
         for col in cols_to_scale:
+
             # Impute -1 in train
             train_col, train_median = preprocess_column(train_nodes[col])
             train_nodes[col] = train_col
@@ -862,8 +865,14 @@ class ModelPipeline:
             train_nodes[col] = scaler.fit_transform(train_nodes[col].values.reshape(-1, 1)).flatten()
             scalers[col] = (scaler, train_median)
 
-            # Impute -1 in val/test with train median
-            for df in [val_nodes, test_nodes]:
+            # Impute -1 in val/test with train median.
+            # TODO: we also impute all nodes here, does this make sense
+            # and is it necessary? We are processing all nodes because
+            # interpreting the GNN requires an input `x` that doesn't
+            # seem to be defined yet. I'm interpreting the `x` we need
+            # to be the one defined in `split_train_test_val_graph`,
+            # but that assumption should be confirmed
+            for df in [nodes, val_nodes, test_nodes]:
                 if col in df.columns:
                     col_vals = df[col].copy()
                     col_vals[col_vals == -1] = train_median
@@ -871,6 +880,7 @@ class ModelPipeline:
 
         # TODO: do we need to have ever copied these, or could we just
         # use / update them in place?
+        self.nodes = nodes
         self.train_nodes = train_nodes
         self.val_nodes = val_nodes
         self.test_nodes = test_nodes
@@ -927,43 +937,52 @@ class ModelPipeline:
             ]
 
         # Nodes
-        tr_x = torch.tensor(self.train_nodes.drop(columns="node_id").values, dtype=torch.float)
-        val_x = torch.tensor(self.val_nodes.drop(columns="node_id").values, dtype=torch.float)
-        te_x = torch.tensor(self.test_nodes.drop(columns="node_id").values, dtype=torch.float)
+        self.x = torch.tensor(self.nodes.drop(columns="node_id").values, dtype=torch.float).to(self.device)
+        tr_x = torch.tensor(self.train_nodes.drop(columns="node_id").values, dtype=torch.float).to(self.device)
+        val_x = torch.tensor(self.val_nodes.drop(columns="node_id").values, dtype=torch.float).to(self.device)
+        te_x = torch.tensor(self.test_nodes.drop(columns="node_id").values, dtype=torch.float).to(self.device)
 
         # Labels
-        self.y = torch.LongTensor(self.df["is_laundering"].to_numpy())
+        self.y = torch.LongTensor(self.df["is_laundering"].to_numpy()).to(self.device)
 
         # Edge index
-        self.edge_index = torch.LongTensor(self.df[["from_account_idx", "to_account_idx"]].to_numpy().T)
+        self.edge_index = torch.LongTensor(self.df[["from_account_idx", "to_account_idx"]].to_numpy().T).to(self.device)
 
         # Edge attr
-        edge_attr = torch.tensor(self.df[edge_features].to_numpy(), dtype=torch.float)
+        edge_attr = torch.tensor(self.df[edge_features].to_numpy(), dtype=torch.float).to(self.device)
 
         # Overwrites the values we got from the original split
-        self.train_indices = torch.tensor(self.train_indices)
-        self.val_indices = torch.tensor(self.val_indices)
-        self.test_indices = torch.tensor(self.test_indices)
+        self.train_indices = torch.tensor(self.train_indices).to(self.device)
+        self.val_indices = torch.tensor(self.val_indices).to(self.device)
+        self.test_indices = torch.tensor(self.test_indices).to(self.device)
 
-        cat_tr_val_inds = torch.cat((self.train_indices, self.val_indices))
+        cat_tr_val_inds = torch.cat((self.train_indices, self.val_indices)).to(self.device)
+        self.data = Data(
+            x=self.x,
+            edge_index=self.edge_index,
+            edge_attr=edge_attr,
+            y=self.y,
+        ).to(self.device)
         self.train_data = Data(
             x=tr_x,
             edge_index=self.edge_index[:,self.train_indices],
             edge_attr=edge_attr[self.train_indices],
             y=self.y[self.train_indices],
-        )
+        ).to(self.device)
         self.val_data = Data(
             x=val_x,
             edge_index=self.edge_index[:,cat_tr_val_inds],
             edge_attr=edge_attr[cat_tr_val_inds],
             y=self.y[cat_tr_val_inds],
-        )
+        ).to(self.device)
         self.test_data = Data(
             x=te_x,
+            # TODO: should this not be the full edge index, edge
+            # attributes, and y?
             edge_index=self.edge_index,
             edge_attr=edge_attr,
             y=self.y,
-        )
+        ).to(self.device)
 
         self.preprocessed["train_test_val_data_split_graph"] = True
 
@@ -982,37 +1001,11 @@ class ModelPipeline:
         logging.info("Getting data loaders")
         Checker.graph_data_split_to_train_val_test(self)
 
-        def scale_data(data, cols_to_scale, device):
-
-            edge_attr_cpu = data.edge_attr.cpu().numpy()
-
-            for col in cols_to_scale:
-                col_data = edge_attr_cpu[:, col]
-                col_data = col_data.copy()
-
-                # Mask to identify valid (non -1) values
-                mask = col_data != -1
-                if np.sum(mask) == 0:
-                    continue  # skip column if all are -1
-
-                # Median impute and scale
-                median_val = np.median(col_data[mask])
-                col_data[~mask] = median_val
-                edge_attr_cpu[:, col] = StandardScaler().fit_transform(col_data.reshape(-1, 1)).flatten()
-
-            data.edge_attr = torch.from_numpy(edge_attr_cpu).float().to(device)
-            data.x = data.x.to(device)
-            data.y = data.y.to(device)
-            return data
-
-        # TODO: might be able to move this to somewhere more meaningful,
-        # but it is needed here at the latest
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-
         # Standard scale on CPU before sending to device
-        self.train_data = scale_data(self.train_data, [1, 2, 3, 4, 5], self.device)
-        self.val_data = scale_data(self.val_data, [1, 2, 3, 4, 5], self.device)
-        self.test_data = scale_data(self.test_data, [1, 2, 3, 4, 5], self.device)
+        columns_to_scale = [1, 2, 3, 4, 5]  # TODO: what are these? Why scale these specifically?
+        self.train_data = scale_graph_edge_attributes(self.train_data, columns_to_scale)
+        self.val_data = scale_graph_edge_attributes(self.val_data, columns_to_scale)
+        self.test_data = scale_graph_edge_attributes(self.test_data, columns_to_scale)
 
         self.train_loader = LinkNeighborLoader(
             data=self.train_data,
@@ -1221,3 +1214,33 @@ class ModelPipeline:
                     break
 
             torch.cuda.empty_cache()
+
+    def initialize_explainer(self, epochs: int=200) -> None:
+        """
+        Run after model training is complete to create an explainer for
+        GNN interpretability
+        """
+        self.explainer = Explainer(
+            model=self.model,
+            algorithm=GNNExplainer(epochs=epochs),  # Higher == better explanation
+            explanation_type="model",               # Explains the model prediction
+            node_mask_type="object",                # Masks each node
+            edge_mask_type="object",                # Masks each edge
+            model_config=dict(
+                mode="binary_classification",       # Licit or illicit
+                task_level="edge",                  # Transactions are labeled, and are edges
+                return_type="raw",                  # Binary classification + logits = raw
+            ),
+        )
+
+    def explain(self, edge_index: int) -> "Explanation":
+        """
+        Provide an `Explanation` for the given `edge_index`
+        """
+        return self.explainer(
+            x=self.x,
+            edge_index=self.edge_index,
+            edge_attr=self.data.edge_attr[:, 1:],  # skips edge_id
+            target=self.y,
+            index=edge_index,
+        )
