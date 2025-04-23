@@ -582,6 +582,7 @@ class ModelPipeline:
         test_size=0.15,
         val_size=0.15,
         split_type="random_stratified",
+        keep_account_idx = False
     ):
         """Perform Train-Test-Validation Split
 
@@ -648,6 +649,10 @@ class ModelPipeline:
                 )
             )
         self.X_cols = X_cols
+        if not keep_account_idx:
+            self.X_cols = self.X_cols + ['from_account_idx','to_account_idx']
+            print("Keeping from_account_idx and to_account_idx (for merging node feats onto tabular data for Catboost)")
+            
         logging.info("Using the following set of 'X_cols'")
         logging.info(self.X_cols)
 
@@ -926,9 +931,11 @@ class ModelPipeline:
                                         If None, will use all columns in node DataFrames except
                                         a "node_id"
         """
-
+        if 'from_account_idx' not in self.X_train.columns:
+            raise RuntimeError("To add node feats to tabular df, need from_account_idx and to_account_idx")
+        
         if node_feat_cols is None:
-            node_feat_cols = self.train_nodes.columns 
+            node_feat_cols = [col for col in self.train_nodes.columns if col != 'node_id']
 
         def merge_feats(txns_df, nodes_df):
             if "node_id" not in nodes_df.columns:
@@ -947,6 +954,8 @@ class ModelPipeline:
             # Merge into transaction dataframe
             txns_df = txns_df.merge(sender_feats, on="from_account_idx", how="left")
             txns_df = txns_df.merge(receiver_feats, on="to_account_idx", how="left")
+            
+            txns_df.drop(columns=['from_account_idx','to_account_idx'])
 
             return txns_df
 
