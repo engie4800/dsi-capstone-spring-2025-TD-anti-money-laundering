@@ -1,5 +1,6 @@
 import datetime
 import logging
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import networkx as nx
@@ -11,7 +12,6 @@ from IPython.display import display
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
 from torch_geometric.data import Data
-from torch_geometric.explain import Explainer, GNNExplainer
 from torch_geometric.loader import LinkNeighborLoader
 from torch.optim import Adam
 from torchmetrics.classification import (
@@ -23,6 +23,7 @@ from torchmetrics.classification import (
 )
 from tqdm import tqdm
 
+from explain import GNNEdgeExplainer
 from helpers.currency import get_usd_conversion
 from helpers.graph import scale_graph_edge_attributes
 from model import GINe
@@ -515,7 +516,7 @@ class ModelPipeline:
 
         return self.train_data, self.val_data, self.test_data
     
-    def run_preprocessing(self, graph_feats=True):
+    def run_preprocessing(self, graph_feats: bool=False) -> None:
         """Runs all preprocessing steps in the correct order.
            Option to not include graph_feats calculation (takes long time)
         """
@@ -527,10 +528,9 @@ class ModelPipeline:
             self.check_for_null()
             self.extract_currency_features()
             self.extract_time_features()
-            self.cyclical_encoding()
-            self.binary_weekend()
             self.create_unique_ids()
             self.extract_additional_time_features()
+            self.cyclical_encoding()
             self.apply_label_encoding()
             self.apply_one_hot_encoding()
             if graph_feats:
@@ -935,6 +935,7 @@ class ModelPipeline:
                 "sent_currency_US Dollar",
                 "sent_currency_Yuan",
             ]
+        self.edge_features = edge_features
 
         # Nodes
         self.x = torch.tensor(self.nodes.drop(columns="node_id").values, dtype=torch.float).to(self.device)
@@ -1045,36 +1046,65 @@ class ModelPipeline:
             self.test_data,
         )
 
-    def initialize_training(self) -> None:
-        # TODO: does it make sense to attach this, as well as well as
-        # the evaluate and train functions, onto the model pipeline?
+    def initialize_training(
+        self,
+        threshold: float=0.5,
+        epochs: int=50,
+        patience: int=10,
+    ) -> None:
+        """Setup the model pipeline for training: metrics, model,
+        optimizer, scheduler, and criterion
+        """
+        self.threshold = threshold
+        self.epochs = epochs
+        self.patience = patience
 
+        # Since `initialize_training` is run after preprocessing is
+        # done, we can define the node and edge features here. This
+        # does assume that column ordering between data frames and
+        # tensors is preserved, and it removes node and edge id
+        self.node_feature_labels = self.nodes.drop(columns="node_id").columns
+        self.edge_feature_labels = self.df[self.edge_features].drop(columns="edge_id").columns
+
+        # Metrics used during training and evaluation
+        self.metrics = SimpleNamespace(
+            accuracy=BinaryAccuracy(threshold=threshold).to(self.device),
+            precision=BinaryPrecision(threshold=threshold).to(self.device),
+            recall=BinaryRecall(threshold=threshold).to(self.device),
+            f1_score=BinaryF1Score(threshold=threshold).to(self.device),
+            pr_auc=BinaryAveragePrecision().to(self.device),
+        )
+
+        # Model setup
         num_edge_features = self.train_data.edge_attr.shape[1]-1  # num edge feats - edge_id
         num_node_features = self.train_data.x.shape[1]
         self.model = GINe(n_node_feats=num_node_features, n_edge_feats=num_edge_features).to(self.device)
         self.optimizer = Adam(self.model.parameters(), lr=0.005)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
-            mode="max",            # maximize the metric (e.g., F1, PR AUC)
-            factor=0.5,            # reduce LR by half when triggered
-            patience=3,            # wait 3 epochs without improvement
-            verbose=True
+            mode="max",      # maximize the metric (e.g., F1, PR AUC)
+            factor=0.5,      # reduce LR by half when triggered
+            patience=3,      # wait 3 epochs without improvement
+            verbose=True,
         )
 
         # pos = (self.df["is_laundering"] == 1).sum()
         # neg = (self.df["is_laundering"] == 0).sum()
         # pos_weight_val = neg / pos
         pos_weight_val = 6
-        self.criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight_val], device=self.device))
+        self.criterion = nn.BCEWithLogitsLoss(
+            pos_weight=torch.tensor([pos_weight_val], device=self.device),
+        )
 
     @torch.no_grad()
-    def evaluate(self, loader, inds, threshold):
+    def evaluate(self, loader, inds):
         self.model.eval()
-        acc_fn = BinaryAccuracy(threshold=threshold).to(self.device)
-        prec_fn = BinaryPrecision(threshold=threshold).to(self.device)
-        rec_fn = BinaryRecall(threshold=threshold).to(self.device)
-        f1_fn = BinaryF1Score(threshold=threshold).to(self.device)
-        pr_auc_fn = BinaryAveragePrecision().to(self.device)
+
+        self.metrics.accuracy.reset()
+        self.metrics.precision.reset()
+        self.metrics.recall.reset()
+        self.metrics.f1_score.reset()
+        self.metrics.pr_auc.reset()
 
         loss_fn = nn.BCEWithLogitsLoss()
         preds, targets, probs = [], [], []
@@ -1093,7 +1123,7 @@ class ModelPipeline:
             logits = self.model(batch.x, batch.edge_index, batch_edge_attr).view(-1)[mask]
             target = batch.y[mask]
             prob = torch.sigmoid(logits)
-            pred = (prob > threshold).long()
+            pred = (prob > self.threshold).long()
 
             total_loss += loss_fn(logits, target.float()).item() * logits.size(0)
 
@@ -1108,36 +1138,30 @@ class ModelPipeline:
 
         return (
             total_loss,
-            acc_fn(preds, targets),
-            prec_fn(preds, targets),
-            rec_fn(preds, targets),
-            f1_fn(preds, targets),
-            pr_auc_fn(probs, targets)
+            self.metrics.accuracy(preds, targets),
+            self.metrics.precision(preds, targets),
+            self.metrics.recall(preds, targets),
+            self.metrics.f1_score(preds, targets),
+            self.metrics.pr_auc(probs, targets)
         )
 
-    def train(self, threshold=0.5, epochs=20, patience=10):
-
-        acc_fn = BinaryAccuracy(threshold=threshold).to(self.device)
-        prec_fn = BinaryPrecision(threshold=threshold).to(self.device)
-        rec_fn = BinaryRecall(threshold=threshold).to(self.device)
-        f1_fn = BinaryF1Score(threshold=threshold).to(self.device)
-        pr_auc_fn = BinaryAveragePrecision().to(self.device)
+    def train(self):
 
         best_val_f1 = 0
         best_pr_auc = 0
         patience_counter = 0  # for early stopping
         min_epochs = 10       # don't allow early model saving
 
-        for epoch in range(epochs):
+        for epoch in range(self.epochs):
             self.model.train()
             train_loss = 0
             train_preds, train_targets, train_probs = [], [], []
 
-            acc_fn.reset()
-            prec_fn.reset()
-            rec_fn.reset()
-            f1_fn.reset()
-            pr_auc_fn.reset()
+            self.metrics.accuracy.reset()
+            self.metrics.precision.reset()
+            self.metrics.recall.reset()
+            self.metrics.f1_score.reset()
+            self.metrics.pr_auc.reset()
 
             for batch in tqdm(self.train_loader, desc=f"Epoch {epoch+1} Training"):
                 self.optimizer.zero_grad()
@@ -1152,7 +1176,7 @@ class ModelPipeline:
                 logits = self.model(batch.x, batch.edge_index, batch_edge_attr).view(-1)[mask]
                 target = batch.y[mask]
                 probs = torch.sigmoid(logits)
-                preds = (probs > threshold).long()
+                preds = (probs > self.threshold).long()
 
                 loss = self.criterion(logits, target.float())
                 loss.backward()
@@ -1169,27 +1193,25 @@ class ModelPipeline:
             train_probs = torch.cat(train_probs)
             train_loss /= len(train_targets)
 
-            train_acc = acc_fn(train_preds, train_targets)
-            train_prec = prec_fn(train_preds, train_targets)
-            train_rec = rec_fn(train_preds, train_targets)
-            train_f1 = f1_fn(train_preds, train_targets)
-            train_pr_auc = pr_auc_fn(train_probs, train_targets)
+            train_acc = self.metrics.accuracy(train_preds, train_targets)
+            train_prec = self.metrics.precision(train_preds, train_targets)
+            train_rec = self.metrics.recall(train_preds, train_targets)
+            train_f1 = self.metrics.f1_score(train_preds, train_targets)
+            train_pr_auc = self.metrics.pr_auc(train_probs, train_targets)
 
             # Validation
             val_loss, val_acc, val_prec, val_rec, val_f1, val_pr_auc = self.evaluate(
                 self.val_loader,
                 self.val_indices,
-                threshold,
             )
 
             # Test
             test_loss, test_acc, test_prec, test_rec, test_f1, test_pr_auc = self.evaluate(
                 self.test_loader,
                 self.test_indices,
-                threshold,
             )
 
-            logging.info(f"Epoch {epoch+1}/{epochs}")
+            logging.info(f"Epoch {epoch+1}/{self.epochs}")
             logging.info(f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Test Loss: {test_loss:.4f}")
             logging.info(f"Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f} | Test Acc: {test_acc:.4f}")
             logging.info(f"Train F1: {train_f1:.4f} | Val F1: {val_f1:.4f} | Test F1: {test_f1:.4f}")
@@ -1208,8 +1230,8 @@ class ModelPipeline:
                 print("✅ New best model saved.")
             elif epoch >= min_epochs:
                 patience_counter += 1
-                print(f"⚠️ No improvement. Patience: {patience_counter}/{patience}")
-                if patience_counter >= patience:
+                print(f"⚠️ No improvement. Patience: {patience_counter}/{self.patience}")
+                if patience_counter >= self.patience:
                     print("🛑 Early stopping triggered.")
                     break
 
@@ -1220,27 +1242,20 @@ class ModelPipeline:
         Run after model training is complete to create an explainer for
         GNN interpretability
         """
-        self.explainer = Explainer(
+        self.explainer = GNNEdgeExplainer(
             model=self.model,
-            algorithm=GNNExplainer(epochs=epochs),  # Higher == better explanation
-            explanation_type="model",               # Explains the model prediction
-            node_mask_type="object",                # Masks each node
-            edge_mask_type="object",                # Masks each edge
-            model_config=dict(
-                mode="binary_classification",       # Licit or illicit
-                task_level="edge",                  # Transactions are labeled, and are edges
-                return_type="raw",                  # Binary classification + logits = raw
-            ),
+            n_node_feats=self.x.size(1),
+            n_edge_feats=self.data.edge_attr.size(1) - 1,  # Minus `edge_id`
+            epochs=epochs,
         )
 
-    def explain(self, edge_index: int) -> "Explanation":
+    def explain(self, target_edge: int) -> "Explanation":
         """
-        Provide an `Explanation` for the given `edge_index`
+        Provide an explanation for the given `edge_index`
         """
         return self.explainer(
             x=self.x,
             edge_index=self.edge_index,
-            edge_attr=self.data.edge_attr[:, 1:],  # skips edge_id
-            target=self.y,
-            index=edge_index,
+            edge_attr=self.data.edge_attr[:, 1:],  # skips `edge_id`
+            target_edge=target_edge,
         )
