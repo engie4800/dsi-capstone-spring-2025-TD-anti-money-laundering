@@ -12,6 +12,7 @@ from IPython.display import display
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
 from torch_geometric.data import Data
+from torch_geometric.explain import Explainer, GNNExplainer
 from torch_geometric.loader import LinkNeighborLoader
 from torch.optim import Adam
 from torchmetrics.classification import (
@@ -1249,13 +1250,42 @@ class ModelPipeline:
             epochs=epochs,
         )
 
-    def explain(self, target_edge: int) -> "Explanation":
-        """
-        Provide an explanation for the given `edge_index`
+        self.gnn_explainer = GNNExplainer(
+            model=self.model,
+            algorithm=GNNExplainer(epochs=epochs),  # Higher == better explanation
+            explanation_type="model",               # Explains the model prediction
+            node_mask_type="object",                # Masks each node
+            edge_mask_type="object",                # Masks each edge
+            model_config=dict(
+                mode="binary_classification",       # Licit or illicit
+                task_level="edge",                  # Transactions are labeled, and are edges
+                return_type="raw",                  # Binary classification + logits = raw
+            ),
+        )
+
+    def explain(self, target_edge: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Provides an explanation for the given `target_edge` using
+        the custom explainer (returns a node and edge mask over the set
+        of features for the target edge). These explanations are for use
+        with the `sample_and_plot_feature_importance` method
         """
         return self.explainer(
             x=self.x,
             edge_index=self.edge_index,
             edge_attr=self.data.edge_attr[:, 1:],  # skips `edge_id`
             target_edge=target_edge,
+        )
+
+    def gnn_explain(self, target_edge: int) -> Explanation:
+        """Provides an explanation for the target edge using
+        `GNNExplainer` configured to mask nodes and edges. Can be used
+        to get an explanation subgraph. These explanations are for use
+        with the `plot_explanation_subgraph` plotting method
+        """
+        return self.gnn_explainer(
+            x=self.x,
+            edge_index=self.edge_index,
+            edge_attr=self.data.edge_attr[:, 1:],  # skips edge_id
+            target=self.y,
+            index=target_edge,
         )
