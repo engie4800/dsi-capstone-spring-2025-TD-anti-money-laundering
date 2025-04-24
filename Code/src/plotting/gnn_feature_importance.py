@@ -6,18 +6,33 @@ import numpy as np
 from pipeline import ModelPipeline
 
 
-def sample_and_plot_feature_importance(p: ModelPipeline, n_samples=1000) -> None:
+def sample_and_plot_feature_importance(
+    p: ModelPipeline,
+    n_samples: int=1000,
+    illicit_transactions_only: bool=False,
+) -> None:
     n_edges = p.edge_index.size(1)
+
+    # Determine eligible edges
+    if illicit_transactions_only:
+        eligible_edges = [i for i in range(n_edges) if p.y[i] == 1]
+    else:
+        eligible_edges = list(range(n_edges))
+    if not eligible_edges:
+        raise ValueError("No eligible edges found for sampling.")
+    if n_samples > len(eligible_edges):
+        raise ValueError(
+            f"Too few edges {len(eligible_edges)} given # samples {n_samples}"
+        )
 
     all_node_masks = []
     all_edge_masks = []
-    target_edges = []
-    for _ in range(n_samples):
-        target_edge = random.randint(0, n_edges - 1)
-        if target_edge in target_edges:
-            # Don't double count edges
+    sampled_edges = set()
+    while len(sampled_edges) < n_samples and len(sampled_edges) < len(eligible_edges):
+        target_edge = random.choice(eligible_edges)
+        if target_edge in sampled_edges:
             continue
-        target_edges.append(target_edge)
+        sampled_edges.add(target_edge)
 
         node_mask, edge_mask = p.explain(target_edge=target_edge)
         all_node_masks.append(node_mask.cpu().numpy())
