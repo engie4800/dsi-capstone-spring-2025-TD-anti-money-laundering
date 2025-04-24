@@ -1276,7 +1276,7 @@ class ModelPipeline:
             target_edge=target_edge,
         )
 
-    def gnn_explain(self, target_edge: int) -> Explanation:
+    def gnn_explain(self, target_edge: int) -> "Explanation":
         """Provides an explanation for the target edge using
         `GNNExplainer` configured to mask nodes and edges. Can be used
         to get an explanation subgraph. These explanations are for use
