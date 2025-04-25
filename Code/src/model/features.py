@@ -225,6 +225,7 @@ def add_unique_identifiers(df: pd.DataFrame) -> pd.DataFrame:
         ],
         inplace=True,
     )
+    df = df.sort_values(by='edge_id').reset_index(drop=True)
 
     return df
 
