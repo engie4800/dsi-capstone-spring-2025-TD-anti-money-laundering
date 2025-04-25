@@ -11,6 +11,7 @@ import torch.nn as nn
 from IPython.display import display
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
+from torch_geometric.explain import Explainer, GNNExplainer
 from torch_geometric.data import Data
 from torch_geometric.loader import LinkNeighborLoader
 
@@ -33,6 +34,9 @@ from model.features import (
     cyclically_encode_feature
 )
 from pipeline.checks import Checker
+
+if TYPE_CHECKING:
+    from torch_geometric.explain import Explanation
 
 class ModelPipeline:
 
