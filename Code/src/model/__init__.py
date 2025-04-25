@@ -37,7 +37,7 @@ class GINe(nn.Module):
                 nn.Linear(self.n_hidden, self.n_hidden),
                 nn.ReLU(),
                 nn.Linear(self.n_hidden, self.n_hidden)
-                ), edge_dim=self.n_hidden)
+            ), edge_dim=self.n_hidden)
 
             if self.edge_updates: self.emlps.append(nn.Sequential(
                 nn.Linear(3 * self.n_hidden, self.n_hidden),
@@ -58,7 +58,8 @@ class GINe(nn.Module):
         )
 
     def forward(
-        self, x: torch.Tensor,
+        self,
+        x: torch.Tensor,
         edge_index: torch.Tensor,
         edge_attr: torch.Tensor,
     ) -> torch.Tensor:

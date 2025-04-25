@@ -18,6 +18,7 @@ from .column_imbalance import (
     plot_column_imbalance,
     plot_column_imbalances,
 )
+from .explanation_subraph import plot_explanation_subgraph
 
 
 __all__ = [
@@ -25,4 +26,5 @@ __all__ = [
     "SOFT_COLORS",
     "plot_column_imbalance",
     "plot_column_imbalances",
+    "plot_explanation_subgraph",
 ]

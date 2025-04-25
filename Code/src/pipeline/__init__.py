@@ -1,5 +1,7 @@
 import datetime
 import logging
+from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import networkx as nx
 import numpy as np
@@ -31,52 +33,6 @@ from model.features import (
     cyclically_encode_feature
 )
 from pipeline.checks import Checker
-
-# =============================================================================
-# Overview of ModelPipeline Functions
-# -----------------------------------------------------------------------------
-# This class orchestrates data preprocessing, feature extraction, GNN tensor
-# generation, and preparation of data loaders for training.
-# =============================================================================
-
-# INITIAL PREPROCESSING -------------------------------------------------------
-# rename_columns:         Rename original columns to Pythonic naming.
-# drop_duplicates:        Remove exact duplicate transactions.
-# check_for_null:         Validate that no nulls exist in the dataset.
-
-# FEATURE ENGINEERING: CURRENCY + TIME ---------------------------------------
-# extract_currency_features:      Compute exchange rates and USD amounts.
-# extract_time_features:          Add time-related features (hour, weekday, etc).
-# cyclical_encoding:              Apply sine/cosine transforms to time features.
-# apply_one_hot_encoding:         One-hot encode categorical variables.
-# apply_label_encoding:           Label encode bank-related fields.
-# extract_additional_time_features:
-#                                Add time_diff_from, time_diff_to, turnaround_time.
-
-# UNIQUE IDENTIFIERS ---------------------------------------------------------
-# create_unique_ids:              Generate unique node and edge IDs.
-
-# NODE FEATURE EXTRACTION ----------------------------------------------------
-# extract_nodes:                  Initializes node feature matrix.
-# add_graph_related_features:     Add graph centrality and PageRank metrics.
-# add_node_features:              Aggregate transaction-level stats to nodes.
-# compute_split_specific_node_features:
-#                                Computes node features separately for train/val/test.
-
-# SPLITTING DATA -------------------------------------------------------------
-# split_train_test_val:           Splits edge data into train/val/test sets.
-# get_split_indices:              Gets edge indices per split.
-
-# GRAPH CONSTRUCTION (PYG) ---------------------------------------------------
-# split_train_test_val_graph:     Structural setup of node & edge data as PyG `Data`.
-# scale_node_data_frames:         Scales node-level features using StandardScaler.
-# scale_edge_features:            Imputes/scales edge features (e.g. sent_amount_usd).
-# generate_tensors:               (Alternative) Create PyG datasets manually.
-# get_data_loaders:               Wraps final data splits into `LinkNeighborLoader`.
-
-# RUNNING THE PIPELINE -------------------------------------------------------
-# run_preprocessing:              Orchestrates entire preprocessing pipeline.
-
 
 class ModelPipeline:
 
@@ -545,9 +501,8 @@ class ModelPipeline:
         self.test_data = create_pyg_data(self.X_test, self.y_test, "test")
 
         return self.train_data, self.val_data, self.test_data
-
     
-    def run_preprocessing(self, graph_feats=True):
+    def run_preprocessing(self, graph_feats: bool=False) -> None:
         """Runs all preprocessing steps in the correct order.
            Option to not include graph_feats calculation (takes long time)
         """
@@ -559,14 +514,14 @@ class ModelPipeline:
             self.check_for_null()
             self.extract_currency_features()
             self.extract_time_features()
-            self.cyclical_encoding()
-            self.binary_weekend()
             self.create_unique_ids()
             self.extract_additional_time_features()
+            self.cyclical_encoding()
             # TODO: do we need label encoding any more? I thought we decided 
             # not to include to/from bank as feature bc of high dimensionality
-            self.apply_label_encoding()
+            # self.apply_label_encoding()
             self.apply_one_hot_encoding()
+            # Do we need this? or no because done in node split process?
             if graph_feats:
                 self.extract_graph_features()
             logging.info("Preprocessing completed successfully!")
@@ -1135,4 +1090,218 @@ class ModelPipeline:
             self.train_data,
             self.val_data,
             self.test_data,
+        )
+
+    def initialize_training(
+        self,
+        threshold: float=0.5,
+        epochs: int=50,
+        patience: int=10,
+    ) -> None:
+        """Setup the model pipeline for training: metrics, model,
+        optimizer, scheduler, and criterion
+        """
+        self.threshold = threshold
+        self.epochs = epochs
+        self.patience = patience
+
+        # Metrics used during training and evaluation
+        self.metrics = SimpleNamespace(
+            accuracy=BinaryAccuracy(threshold=threshold).to(self.device),
+            precision=BinaryPrecision(threshold=threshold).to(self.device),
+            recall=BinaryRecall(threshold=threshold).to(self.device),
+            f1_score=BinaryF1Score(threshold=threshold).to(self.device),
+            pr_auc=BinaryAveragePrecision().to(self.device),
+        )
+
+        # Model setup
+        num_edge_features = self.train_data.edge_attr.shape[1]-1  # num edge feats - edge_id
+        num_node_features = self.train_data.x.shape[1]
+        self.model = GINe(n_node_feats=num_node_features, n_edge_feats=num_edge_features).to(self.device)
+        self.optimizer = Adam(self.model.parameters(), lr=0.005)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer,
+            mode="max",      # maximize the metric (e.g., F1, PR AUC)
+            factor=0.5,      # reduce LR by half when triggered
+            patience=3,      # wait 3 epochs without improvement
+            verbose=True,
+        )
+
+        # pos = (self.df["is_laundering"] == 1).sum()
+        # neg = (self.df["is_laundering"] == 0).sum()
+        # pos_weight_val = neg / pos
+        pos_weight_val = 6
+        self.criterion = nn.BCEWithLogitsLoss(
+            pos_weight=torch.tensor([pos_weight_val], device=self.device),
+        )
+
+    @torch.no_grad()
+    def evaluate(self, loader, inds):
+        self.model.eval()
+
+        self.metrics.accuracy.reset()
+        self.metrics.precision.reset()
+        self.metrics.recall.reset()
+        self.metrics.f1_score.reset()
+        self.metrics.pr_auc.reset()
+
+        loss_fn = nn.BCEWithLogitsLoss()
+        preds, targets, probs = [], [], []
+        total_loss = 0
+
+        for batch in loader:
+            batch_input_ids = batch.input_id.detach().cpu()
+            global_seed_inds = inds[batch_input_ids]
+            seed_edge_ids = self.df.loc[global_seed_inds.cpu().numpy(), "edge_id"].values
+            edge_ids_in_batch = batch.edge_attr[:, 0].detach().cpu().numpy()
+            mask = torch.isin(torch.tensor(edge_ids_in_batch), torch.tensor(seed_edge_ids)).to(self.device)
+
+            batch_edge_attr = batch.edge_attr[:, 1:].clone()
+            batch = batch.to(self.device)
+
+            logits = self.model(batch.x, batch.edge_index, batch_edge_attr).view(-1)[mask]
+            target = batch.y[mask]
+            prob = torch.sigmoid(logits)
+            pred = (prob > self.threshold).long()
+
+            total_loss += loss_fn(logits, target.float()).item() * logits.size(0)
+
+            preds.append(pred)
+            targets.append(target)
+            probs.append(prob)
+
+        preds = torch.cat(preds)
+        targets = torch.cat(targets)
+        probs = torch.cat(probs)
+        total_loss /= len(targets)
+
+        return (
+            total_loss,
+            self.metrics.accuracy(preds, targets),
+            self.metrics.precision(preds, targets),
+            self.metrics.recall(preds, targets),
+            self.metrics.f1_score(preds, targets),
+            self.metrics.pr_auc(probs, targets)
+        )
+
+    def train(self):
+
+        best_val_f1 = 0
+        best_pr_auc = 0
+        patience_counter = 0  # for early stopping
+        min_epochs = 10       # don't allow early model saving
+
+        for epoch in range(self.epochs):
+            self.model.train()
+            train_loss = 0
+            train_preds, train_targets, train_probs = [], [], []
+
+            self.metrics.accuracy.reset()
+            self.metrics.precision.reset()
+            self.metrics.recall.reset()
+            self.metrics.f1_score.reset()
+            self.metrics.pr_auc.reset()
+
+            for batch in tqdm(self.train_loader, desc=f"Epoch {epoch+1} Training"):
+                self.optimizer.zero_grad()
+                batch_input_ids = batch.input_id.detach().cpu()
+                global_seed_inds = self.train_indices[batch_input_ids]
+                seed_edge_ids = self.df.loc[global_seed_inds.cpu().numpy(), "edge_id"].values
+                edge_ids_in_batch = batch.edge_attr[:, 0].detach().cpu().numpy()
+                mask = torch.isin(torch.tensor(edge_ids_in_batch), torch.tensor(seed_edge_ids)).to(self.device)
+
+                batch_edge_attr = batch.edge_attr[:, 1:].clone()
+                batch = batch.to(self.device)
+                logits = self.model(batch.x, batch.edge_index, batch_edge_attr).view(-1)[mask]
+                target = batch.y[mask]
+                probs = torch.sigmoid(logits)
+                preds = (probs > self.threshold).long()
+
+                loss = self.criterion(logits, target.float())
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
+                self.optimizer.step()
+
+                train_loss += loss.item() * logits.size(0)
+                train_preds.append(preds)
+                train_targets.append(target)
+                train_probs.append(probs)
+
+            train_preds = torch.cat(train_preds)
+            train_targets = torch.cat(train_targets)
+            train_probs = torch.cat(train_probs)
+            train_loss /= len(train_targets)
+
+            train_acc = self.metrics.accuracy(train_preds, train_targets)
+            train_prec = self.metrics.precision(train_preds, train_targets)
+            train_rec = self.metrics.recall(train_preds, train_targets)
+            train_f1 = self.metrics.f1_score(train_preds, train_targets)
+            train_pr_auc = self.metrics.pr_auc(train_probs, train_targets)
+
+            # Validation
+            val_loss, val_acc, val_prec, val_rec, val_f1, val_pr_auc = self.evaluate(
+                self.val_loader,
+                self.val_indices,
+            )
+
+            # Test
+            test_loss, test_acc, test_prec, test_rec, test_f1, test_pr_auc = self.evaluate(
+                self.test_loader,
+                self.test_indices,
+            )
+
+            logging.info(f"Epoch {epoch+1}/{self.epochs}")
+            logging.info(f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Test Loss: {test_loss:.4f}")
+            logging.info(f"Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f} | Test Acc: {test_acc:.4f}")
+            logging.info(f"Train F1: {train_f1:.4f} | Val F1: {val_f1:.4f} | Test F1: {test_f1:.4f}")
+            logging.info(f"Train PR-AUC: {train_pr_auc:.4f} | Val PR-AUC: {val_pr_auc:.4f} | Test PR-AUC: {test_pr_auc:.4f}")
+            logging.info(f"Train Prec: {train_prec:.4f} | Val Prec: {val_prec:.4f} | Test Prec: {test_prec:.4f}")
+            logging.info(f"Train Rec: {train_rec:.4f} | Val Rec: {val_rec:.4f} | Test Rec: {test_rec:.4f}")
+            logging.info("-" * 80)
+
+            self.scheduler.step(val_f1)
+
+            if epoch >= min_epochs and ((val_f1 > best_val_f1) or (val_pr_auc > best_pr_auc)):
+                best_val_f1 = max(val_f1, best_val_f1)
+                best_pr_auc = max(val_pr_auc, best_pr_auc)
+                patience_counter = 0
+                torch.save(self.model.state_dict(), f"best_model_epoch{epoch+1}.pt")
+                print("✅ New best model saved.")
+            elif epoch >= min_epochs:
+                patience_counter += 1
+                print(f"⚠️ No improvement. Patience: {patience_counter}/{self.patience}")
+                if patience_counter >= self.patience:
+                    print("🛑 Early stopping triggered.")
+                    break
+
+            torch.cuda.empty_cache()
+
+    def initialize_explainer(self, epochs: int=200) -> None:
+        """
+        Run after model training is complete to create an explainer for
+        GNN interpretability
+        """
+        self.explainer = Explainer(
+            model=self.model,
+            algorithm=GNNExplainer(epochs=epochs),  # Higher == better explanation
+            explanation_type="model",               # Explains the model prediction
+            node_mask_type="object",                # Masks each node
+            edge_mask_type="object",                # Masks each edge
+            model_config=dict(
+                mode="binary_classification",       # Licit or illicit
+                task_level="edge",                  # Transactions are labeled, and are edges
+                return_type="raw",                  # Binary classification + logits = raw
+            ),
+        )
+
+    def explain(self, edge_index: int) -> "Explanation":
+        """
+        Provide an `Explanation` for the given `edge_index`
+        """
+        return self.explainer(
+            x=self.x,
+            edge_index=self.edge_index,
+            edge_attr=self.data.edge_attr[:, 1:],  # skips edge_id
+            target=self.y,
+            index=edge_index,
         )
