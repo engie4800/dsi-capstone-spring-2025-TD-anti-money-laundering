@@ -1224,9 +1224,10 @@ class ModelPipeline:
                 seed_edge_ids = self.df.loc[global_seed_inds.cpu().numpy(), "edge_id"].values
                 edge_ids_in_batch = batch.edge_attr[:, 0].detach().cpu().numpy()
                 mask = torch.isin(torch.tensor(edge_ids_in_batch), torch.tensor(seed_edge_ids)).to(self.device)
-
-                batch_edge_attr = batch.edge_attr[:, 1:].clone()
+                
                 batch = batch.to(self.device)
+                batch_edge_attr = batch.edge_attr[:, 1:].clone()
+                
                 logits = self.model(batch.x, batch.edge_index, batch_edge_attr).view(-1)[mask]
                 target = batch.y[mask]
                 probs = torch.sigmoid(logits)
