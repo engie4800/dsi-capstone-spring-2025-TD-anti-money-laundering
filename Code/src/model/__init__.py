@@ -15,9 +15,10 @@ import logging
 
 
 class GINe(nn.Module):
+
     def __init__(self, n_node_feats, n_edge_feats, num_gnn_layers=2, n_classes=1,
-                n_hidden=100, edge_updates=True, residual=True,
-                dropout=0.0, final_dropout=0.10527690625126304):
+                 n_hidden=100, edge_updates=True, residual=True,
+                 dropout=0.0, final_dropout=0.10527690625126304):
         super().__init__()
         self.n_hidden = n_hidden
         self.num_gnn_layers = num_gnn_layers
@@ -56,7 +57,11 @@ class GINe(nn.Module):
             nn.Linear(25, n_classes),
         )
 
-    def forward(self, x, edge_index, edge_attr):
+    def forward(
+        self, x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_attr: torch.Tensor,
+    ) -> torch.Tensor:
         src, dst = edge_index
 
         x = self.node_emb(x)
@@ -75,6 +80,7 @@ class GINe(nn.Module):
 
         # Final prediction
         x_edge = torch.cat([x[src], x[dst], edge_attr], dim=-1)
+
         return self.mlp(x_edge).squeeze(-1)
 
 class GNNTrainer:
