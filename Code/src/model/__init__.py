@@ -109,6 +109,7 @@ class GNNTrainer:
         self.epochs = pl.epochs
         
         # Data
+        self.df = pl.df
         self.train_loader = pl.train_loader
         self.val_loader = pl.val_loader
         self.test_loader = pl.test_loader
