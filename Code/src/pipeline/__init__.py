@@ -1,6 +1,5 @@
 import datetime
 import logging
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import networkx as nx
@@ -11,24 +10,10 @@ import torch.nn as nn
 from IPython.display import display
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
-from torch_geometric.explain import Explainer, GNNExplainer
 from torch_geometric.data import Data
-from torch_geometric.loader import LinkNeighborLoader
-from torch_geometric.nn import GINEConv
-from torch.optim import Adam
-from torchmetrics.classification import (
-    BinaryAccuracy,
-    BinaryPrecision,
-    BinaryRecall,
-    BinaryF1Score,
-    BinaryAveragePrecision,
-)
-from tqdm import tqdm
 import logging
 
-from explain import GNNEdgeExplainer
 from helpers.currency import get_usd_conversion
-from model import GINe
 from model.features import (
     add_currency_exchange,
     add_day_of_week,
@@ -82,6 +67,10 @@ class ModelPipeline:
             "got_data_loaders": False,
         }
 
+    #----------------------
+    # Data summary
+    #----------------------
+    
     def df_summary(self):
         logging.info("DATA HEAD")
         display(self.df.head())
@@ -91,6 +80,10 @@ class ModelPipeline:
     def y_statistics(self):
         logging.info("Normalized Value Count: ")
         logging.info(self.df["is_laundering"].value_counts(normalize=True))
+        
+    #---------------------
+    # Data preprocessing
+    #---------------------
 
     def rename_columns(self) -> None:
         """
@@ -318,6 +311,7 @@ class ModelPipeline:
         logging.info(f"One hot encoding applied to columns: {categorical_features}\n")
         self.preprocessed["onehot_encoded"] = True
         
+    # TODO: need? 
     def apply_label_encoding(self, categorical_features=None):
         """Label encode categorical columns, handling related columns"""
         logging.info("Applying label encoding...")
@@ -362,8 +356,7 @@ class ModelPipeline:
         self.X_test[numerical_features] = std_scaler.transform(self.X_test[numerical_features])
         self.X_val[numerical_features] = std_scaler.transform(self.X_val[numerical_features])
 
-        return self.X_train, self.X_test, self.X_val
-
+    # TODO: need? 
     def add_graph_related_features(self, weight_cols):
         """Generate graph-based neighborhood context features"""
         logging.info("Adding graph related features...")
@@ -409,6 +402,7 @@ class ModelPipeline:
             f"{', '.join([f'pagerank_{col}' for col in weight_cols])}\n"
         )
 
+    # TODO: need? 
     def add_node_features(self, node_features):
         logging.info("Adding node features...")
 
@@ -537,14 +531,25 @@ class ModelPipeline:
             # not to include to/from bank as feature bc of high dimensionality
             # self.apply_label_encoding()
             self.apply_one_hot_encoding()
-            # Do we need this? or no because done in node split process?
-            if graph_feats:
-                self.extract_graph_features()
+            # TODO: Do we need this? or no because done in node split process?
+            # if graph_feats:
+            #     self.extract_graph_features()
             logging.info("Preprocessing completed successfully!")
             logging.info(self.preprocessed)
 
         except Exception as e:
             logging.info(f"Error in preprocessing: {e}")
+
+    #-----------------
+    # Hooks
+    #-----------------
+    
+    def should_keep_acct_idx(self) -> bool:
+        return False
+
+    #-----------------
+    # Splitting
+    #-----------------
 
     def split_train_test_val(
         self,
@@ -553,7 +558,6 @@ class ModelPipeline:
         test_size=0.15,
         val_size=0.15,
         split_type="random_stratified",
-        keep_account_idx = False
     ):
         """Perform Train-Test-Validation Split
 
@@ -620,7 +624,7 @@ class ModelPipeline:
                 )
             )
         self.X_cols = X_cols
-        if not keep_account_idx:
+        if self.should_keep_acct_idx():
             self.X_cols = self.X_cols + ['from_account_idx','to_account_idx']
             print("Keeping from_account_idx and to_account_idx (for merging node feats onto tabular data for Catboost)")
             
@@ -684,8 +688,6 @@ class ModelPipeline:
         # This assumes we should just always get (and attach to the
         # pipeline) the split indices
         self.get_split_indices()
-
-        return self.X_train, self.X_val, self.X_test, self.y_train, self.y_val, self.y_test
 
     def get_split_indices(self):
         """
@@ -887,472 +889,4 @@ class ModelPipeline:
                     df[col] = scalers[col][0].transform(col_vals.values.reshape(-1, 1)).flatten()
 
         self.preprocessed["node_datasets_scaled"] = True
-
-        return self.train_nodes, self.val_nodes, self.test_nodes
-    
-    
-    def add_node_graph_feats_to_df(self, node_feat_cols=None):
-        """
-        Used for non-GNN model (e.g., CatBoost).
-        Merge node-level graph features (e.g., pagerank, degree_centrality)
-        into the transaction DataFrames (X_train, X_val, X_test) for both sender and receiver.
-
-        Args:
-            node_feat_cols (list or None): List of node feature columns to merge (excluding 'node_id').
-                                        If None, will use all columns in node DataFrames except
-                                        a "node_id"
-        """
-        if 'from_account_idx' not in self.X_train.columns:
-            raise RuntimeError("To add node feats to tabular df, need from_account_idx and to_account_idx")
-        
-        if node_feat_cols is None:
-            node_feat_cols = [col for col in self.train_nodes.columns if col != 'node_id']
-
-        def merge_feats(txns_df, nodes_df):
-            if "node_id" not in nodes_df.columns:
-                raise ValueError("Each nodes_df must include a 'node_id' column")
-
-            # Sender node features
-            sender_feats = nodes_df[["node_id"] + node_feat_cols].copy()
-            sender_feats = sender_feats.rename(columns={col: f"from_{col}" for col in node_feat_cols})
-            sender_feats = sender_feats.rename(columns={"node_id": "from_account_idx"})
-
-            # Receiver node features
-            receiver_feats = nodes_df[["node_id"] + node_feat_cols].copy()
-            receiver_feats = receiver_feats.rename(columns={col: f"to_{col}" for col in node_feat_cols})
-            receiver_feats = receiver_feats.rename(columns={"node_id": "to_account_idx"})
-
-            # Merge into transaction dataframe
-            txns_df = txns_df.merge(sender_feats, on="from_account_idx", how="left")
-            txns_df = txns_df.merge(receiver_feats, on="to_account_idx", how="left")
-            
-            txns_df.drop(columns=['from_account_idx','to_account_idx'])
-
-            return txns_df
-
-        self.X_train = merge_feats(self.X_train, self.train_nodes)
-        self.X_val = merge_feats(self.X_val, self.val_nodes)
-        self.X_test = merge_feats(self.X_test, self.test_nodes)
-
-        return self.X_train, self.X_val, self.X_test
-
-    
-    
-    def split_train_test_val_graph(self, edge_features=None):
-        """Creates graph objects for use in GNN.
-        """
-        logging.info("Splitting into train, test, validation graphs")
-        Checker.train_val_test_node_features_added(self)
-        
-        # make sure sorted
-        self.df.sort_values("edge_id", inplace=True)
-        self.df.reset_index(drop=True, inplace=True)
-
-        # A default set of edge features that excludes some obvious
-        # features we don't want
-        if edge_features is None:
-            # TODO: any reason not to do this? 
-            self.edge_features = ['edge_id'] + [col for col in self.X_cols if col != 'edge_id'] 
-        else:
-            self.edge_features = edge_features
-        # Nodes
-        tr_x = torch.tensor(self.train_nodes.drop(columns="node_id").values, dtype=torch.float)
-        val_x = torch.tensor(self.val_nodes.drop(columns="node_id").values, dtype=torch.float)
-        te_x = torch.tensor(self.test_nodes.drop(columns="node_id").values, dtype=torch.float)
-
-        # Labels
-        self.y = torch.LongTensor(self.df["is_laundering"].to_numpy())
-
-        # Edge index
-        self.edge_index = torch.LongTensor(self.df[["from_account_idx", "to_account_idx"]].to_numpy().T)
-
-        # Edge attr
-        edge_attr = torch.tensor(self.df[self.edge_features].to_numpy(), dtype=torch.float)
-
-        # Overwrites the values we got from the original split
-        self.train_indices = torch.tensor(self.train_indices)
-        self.val_indices = torch.tensor(self.val_indices)
-        self.test_indices = torch.tensor(self.test_indices)
-
-        cat_tr_val_inds = torch.cat((self.train_indices, self.val_indices))
-        self.train_data = Data(
-            x=tr_x,
-            edge_index=self.edge_index[:,self.train_indices],
-            edge_attr=edge_attr[self.train_indices],
-            y=self.y[self.train_indices],
-        )
-        self.val_data = Data(
-            x=val_x,
-            edge_index=self.edge_index[:,cat_tr_val_inds],
-            edge_attr=edge_attr[cat_tr_val_inds],
-            y=self.y[cat_tr_val_inds],
-        )
-        self.test_data = Data(
-            x=te_x,
-            edge_index=self.edge_index,
-            edge_attr=edge_attr,
-            y=self.y,
-        )
-
-        self.preprocessed["train_test_val_data_split_graph"] = True
-        
-        # TODO: again, do we need to return this stuff or nah
-        return (
-            self.train_indices,
-            self.val_indices,
-            self.test_indices,
-            self.train_data,
-            self.val_data,
-            self.test_data,
-            self.edge_index,
-            self.y,
-        )
-        
-    def scale_edge_features(self, edge_features_to_scale: list[str]):
-        """
-        Scale and impute edge features in train/val/test data in place.
-        Uses training set to fit scalers, then applies to all sets.
-        """
-        logging.info("Scaling edge features: %s", edge_features_to_scale)
-        
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        if edge_features_to_scale is None:
-            self.scaled_edge_features = [
-                "sent_amount_usd",
-                "timestamp_scaled",
-                "time_diff_from",
-                "time_diff_to",
-                "turnaround_time",
-            ]
-        else:
-            self.scaled_edge_features = edge_features_to_scale
-        
-        scalers = {}
-        train_edge_attr = self.train_data.edge_attr.cpu().numpy()
-        val_edge_attr = self.val_data.edge_attr.cpu().numpy()
-        test_edge_attr = self.test_data.edge_attr.cpu().numpy()
-        
-        # Map feature name to index
-        feature_idx_map = {name: i for i, name in enumerate(self.edge_features)}
-
-        for feature in self.scaled_edge_features:
-            col_idx = feature_idx_map[feature] 
-            train_vals = train_edge_attr[:, col_idx]
-            mask = train_vals != -1
-            if np.sum(mask) == 0:
-                logging.warning(f"All values -1 for {feature}; skipping.")
-                continue
-
-            median_val = np.median(train_vals[mask])
-            train_vals[~mask] = median_val
-
-            scaler = StandardScaler()
-            train_scaled = scaler.fit_transform(train_vals.reshape(-1, 1)).flatten()
-
-            # Apply to val/test
-            for edge_attr in [val_edge_attr, test_edge_attr]:
-                col = edge_attr[:, col_idx]
-                col[col == -1] = median_val
-                edge_attr[:, col_idx] = scaler.transform(col.reshape(-1, 1)).flatten()
-
-            train_edge_attr[:, col_idx] = train_scaled
-            scalers[feature] = scaler # TODO: do we need to return the scalars? why do we have this?
-
-        self.train_data.edge_attr = torch.tensor(train_edge_attr, dtype=torch.float32, device=self.device)
-        self.val_data.edge_attr = torch.tensor(val_edge_attr, dtype=torch.float32, device=self.device)
-        self.test_data.edge_attr = torch.tensor(test_edge_attr, dtype=torch.float32, device=self.device)
-
-        return scalers
-
-
-    def get_data_loaders(self, num_neighbors=[100,100], batch_size=8192):
-        logging.info("Getting data loaders")
-        Checker.graph_data_split_to_train_val_test(self)
-
-        # TODO: might be able to move this to somewhere more meaningful,
-        # but it is needed here at the latest
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        self.train_loader = LinkNeighborLoader(
-            data=self.train_data,
-            edge_label_index=self.edge_index[:, self.train_indices],
-            edge_label=self.y[self.train_indices],
-            batch_size=batch_size,
-            num_neighbors=num_neighbors,
-            shuffle=True,
-        )
-
-        self.val_loader = LinkNeighborLoader(
-            data=self.val_data,
-            edge_label_index=self.edge_index[:, self.val_indices],
-            edge_label=self.y[self.val_indices],
-            batch_size=batch_size,
-            num_neighbors=num_neighbors,
-            shuffle=False,
-        )
-
-        self.test_loader = LinkNeighborLoader(
-            data=self.test_data,
-            edge_label_index=self.edge_index[:, self.test_indices],
-            edge_label=self.y[self.test_indices],
-            batch_size=batch_size,
-            num_neighbors=num_neighbors,
-            shuffle=False,
-        )
-
-        self.preprocessed["got_data_loaders"] = True
-
-        return (
-            self.train_loader,
-            self.val_loader,
-            self.test_loader,
-            self.train_data,
-            self.val_data,
-            self.test_data,
-        )
-
-    def initialize_training(
-        self,
-        threshold: float=0.5,
-        epochs: int=50,
-        patience: int=10,
-    ) -> None:
-        """Setup the model pipeline for training: metrics, model,
-        optimizer, scheduler, and criterion
-        """
-        self.threshold = threshold
-        self.epochs = epochs
-        self.patience = patience
-
-        # Since `initialize_training` is run after preprocessing is
-        # done, we can define the node and edge features here. This
-        # does assume that column ordering between data frames and
-        # tensors is preserved, and it removes node and edge id
-        self.node_feature_labels = self.nodes.drop(columns="node_id").columns
-        self.edge_feature_labels = self.df[self.edge_features].drop(columns="edge_id").columns
-
-        # Metrics used during training and evaluation
-        self.metrics = SimpleNamespace(
-            accuracy=BinaryAccuracy(threshold=threshold).to(self.device),
-            precision=BinaryPrecision(threshold=threshold).to(self.device),
-            recall=BinaryRecall(threshold=threshold).to(self.device),
-            f1_score=BinaryF1Score(threshold=threshold).to(self.device),
-            pr_auc=BinaryAveragePrecision().to(self.device),
-        )
-
-        # Model setup
-        num_edge_features = self.train_data.edge_attr.shape[1]-1  # num edge feats - edge_id
-        num_node_features = self.train_data.x.shape[1]
-        self.model = GINe(n_node_feats=num_node_features, n_edge_feats=num_edge_features).to(self.device)
-        self.optimizer = Adam(self.model.parameters(), lr=0.005)
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer,
-            mode="max",      # maximize the metric (e.g., F1, PR AUC)
-            factor=0.5,      # reduce LR by half when triggered
-            patience=3,      # wait 3 epochs without improvement
-            verbose=True,
-        )
-
-        # pos = (self.df["is_laundering"] == 1).sum()
-        # neg = (self.df["is_laundering"] == 0).sum()
-        # pos_weight_val = neg / pos
-        pos_weight_val = 6
-        self.criterion = nn.BCEWithLogitsLoss(
-            pos_weight=torch.tensor([pos_weight_val], device=self.device),
-        )
-
-    @torch.no_grad()
-    def evaluate(self, loader, inds):
-        self.model.eval()
-
-        self.metrics.accuracy.reset()
-        self.metrics.precision.reset()
-        self.metrics.recall.reset()
-        self.metrics.f1_score.reset()
-        self.metrics.pr_auc.reset()
-
-        loss_fn = nn.BCEWithLogitsLoss()
-        preds, targets, probs = [], [], []
-        total_loss = 0
-
-        for batch in loader:
-            batch_input_ids = batch.input_id.detach().cpu()
-            global_seed_inds = inds[batch_input_ids]
-            seed_edge_ids = self.df.loc[global_seed_inds.cpu().numpy(), "edge_id"].values
-            edge_ids_in_batch = batch.edge_attr[:, 0].detach().cpu().numpy()
-            mask = torch.isin(torch.tensor(edge_ids_in_batch), torch.tensor(seed_edge_ids)).to(self.device)
-
-            batch = batch.to(self.device)
-            batch_edge_attr = batch.edge_attr[:, 1:].clone()
-            
-
-            logits = self.model(batch.x, batch.edge_index, batch_edge_attr).view(-1)[mask]
-            target = batch.y[mask]
-            prob = torch.sigmoid(logits)
-            pred = (prob > self.threshold).long()
-
-            total_loss += loss_fn(logits, target.float()).item() * logits.size(0)
-
-            preds.append(pred)
-            targets.append(target)
-            probs.append(prob)
-
-        preds = torch.cat(preds)
-        targets = torch.cat(targets)
-        probs = torch.cat(probs)
-        total_loss /= len(targets)
-
-        return (
-            total_loss,
-            self.metrics.accuracy(preds, targets),
-            self.metrics.precision(preds, targets),
-            self.metrics.recall(preds, targets),
-            self.metrics.f1_score(preds, targets),
-            self.metrics.pr_auc(probs, targets)
-        )
-
-    def train(self):
-
-        best_val_f1 = 0
-        best_pr_auc = 0
-        patience_counter = 0  # for early stopping
-        min_epochs = 10       # don't allow early model saving
-
-        for epoch in range(self.epochs):
-            self.model.train()
-            train_loss = 0
-            train_preds, train_targets, train_probs = [], [], []
-
-            self.metrics.accuracy.reset()
-            self.metrics.precision.reset()
-            self.metrics.recall.reset()
-            self.metrics.f1_score.reset()
-            self.metrics.pr_auc.reset()
-
-            for batch in tqdm(self.train_loader, desc=f"Epoch {epoch+1} Training"):
-                self.optimizer.zero_grad()
-                batch_input_ids = batch.input_id.detach().cpu()
-                global_seed_inds = self.train_indices[batch_input_ids]
-                seed_edge_ids = self.df.loc[global_seed_inds.cpu().numpy(), "edge_id"].values
-                edge_ids_in_batch = batch.edge_attr[:, 0].detach().cpu().numpy()
-                mask = torch.isin(torch.tensor(edge_ids_in_batch), torch.tensor(seed_edge_ids)).to(self.device)
-                
-                batch = batch.to(self.device)
-                batch_edge_attr = batch.edge_attr[:, 1:].clone()
-                
-                logits = self.model(batch.x, batch.edge_index, batch_edge_attr).view(-1)[mask]
-                target = batch.y[mask]
-                probs = torch.sigmoid(logits)
-                preds = (probs > self.threshold).long()
-
-                loss = self.criterion(logits, target.float())
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
-                self.optimizer.step()
-
-                train_loss += loss.item() * logits.size(0)
-                train_preds.append(preds)
-                train_targets.append(target)
-                train_probs.append(probs)
-
-            train_preds = torch.cat(train_preds)
-            train_targets = torch.cat(train_targets)
-            train_probs = torch.cat(train_probs)
-            train_loss /= len(train_targets)
-
-            train_acc = self.metrics.accuracy(train_preds, train_targets)
-            train_prec = self.metrics.precision(train_preds, train_targets)
-            train_rec = self.metrics.recall(train_preds, train_targets)
-            train_f1 = self.metrics.f1_score(train_preds, train_targets)
-            train_pr_auc = self.metrics.pr_auc(train_probs, train_targets)
-
-            # Validation
-            val_loss, val_acc, val_prec, val_rec, val_f1, val_pr_auc = self.evaluate(
-                self.val_loader,
-                self.val_indices,
-            )
-
-            # Test
-            test_loss, test_acc, test_prec, test_rec, test_f1, test_pr_auc = self.evaluate(
-                self.test_loader,
-                self.test_indices,
-            )
-
-            logging.info(f"Epoch {epoch+1}/{self.epochs}")
-            logging.info(f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Test Loss: {test_loss:.4f}")
-            logging.info(f"Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f} | Test Acc: {test_acc:.4f}")
-            logging.info(f"Train F1: {train_f1:.4f} | Val F1: {val_f1:.4f} | Test F1: {test_f1:.4f}")
-            logging.info(f"Train PR-AUC: {train_pr_auc:.4f} | Val PR-AUC: {val_pr_auc:.4f} | Test PR-AUC: {test_pr_auc:.4f}")
-            logging.info(f"Train Prec: {train_prec:.4f} | Val Prec: {val_prec:.4f} | Test Prec: {test_prec:.4f}")
-            logging.info(f"Train Rec: {train_rec:.4f} | Val Rec: {val_rec:.4f} | Test Rec: {test_rec:.4f}")
-            logging.info("-" * 80)
-
-            self.scheduler.step(val_f1)
-
-            if epoch >= min_epochs and ((val_f1 > best_val_f1) or (val_pr_auc > best_pr_auc)):
-                best_val_f1 = max(val_f1, best_val_f1)
-                best_pr_auc = max(val_pr_auc, best_pr_auc)
-                patience_counter = 0
-                torch.save(self.model.state_dict(), f"best_model_epoch{epoch+1}.pt")
-                print("✅ New best model saved.")
-            elif epoch >= min_epochs:
-                patience_counter += 1
-                print(f"⚠️ No improvement. Patience: {patience_counter}/{self.patience}")
-                if patience_counter >= self.patience:
-                    print("🛑 Early stopping triggered.")
-                    break
-
-            torch.cuda.empty_cache()
-
-    def initialize_explainer(self, epochs: int=200) -> None:
-        """
-        Run after model training is complete to create an explainer for
-        GNN interpretability
-        """
-        self.explainer = GNNEdgeExplainer(
-            model=self.model,
-            n_node_feats=self.x.size(1),
-            n_edge_feats=self.data.edge_attr.size(1) - 1,  # Minus `edge_id`
-            epochs=epochs,
-        )
-
-        self.gnn_explainer = GNNExplainer(
-            model=self.model,
-            algorithm=GNNExplainer(epochs=epochs),  # Higher == better explanation
-            explanation_type="model",               # Explains the model prediction
-            node_mask_type="object",                # Masks each node
-            edge_mask_type="object",                # Masks each edge
-            model_config=dict(
-                mode="binary_classification",       # Licit or illicit
-                task_level="edge",                  # Transactions are labeled, and are edges
-                return_type="raw",                  # Binary classification + logits = raw
-            ),
-        )
-
-    def explain(self, target_edge: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """Provides an explanation for the given `target_edge` using
-        the custom explainer (returns a node and edge mask over the set
-        of features for the target edge). These explanations are for use
-        with the `sample_and_plot_feature_importance` method
-        """
-        return self.explainer(
-            x=self.x,
-            edge_index=self.edge_index,
-            edge_attr=self.data.edge_attr[:, 1:],  # skips `edge_id`
-            target_edge=target_edge,
-        )
-
-    def gnn_explain(self, target_edge: int) -> "Explanation":
-        """Provides an explanation for the target edge using
-        `GNNExplainer` configured to mask nodes and edges. Can be used
-        to get an explanation subgraph. These explanations are for use
-        with the `plot_explanation_subgraph` plotting method
-        """
-        return self.gnn_explainer(
-            x=self.x,
-            edge_index=self.edge_index,
-            edge_attr=self.data.edge_attr[:, 1:],  # skips edge_id
-            target=self.y,
-            index=target_edge,
-        )
+  
