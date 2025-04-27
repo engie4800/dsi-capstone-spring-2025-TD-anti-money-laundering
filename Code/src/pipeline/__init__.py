@@ -942,6 +942,10 @@ class ModelPipeline:
         """
         logging.info("Splitting into train, test, validation graphs")
         Checker.train_val_test_node_features_added(self)
+        
+        # make sure sorted
+        self.df.sort_values("edge_id", inplace=True)
+        self.df.reset_index(drop=True, inplace=True)
 
         # A default set of edge features that excludes some obvious
         # features we don't want
