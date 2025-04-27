@@ -43,6 +43,7 @@ class ModelPipeline:
         """
         self.dataset_path = dataset_path
         self.df = pd.read_csv(self.dataset_path)
+        self.initial_features = list(self.df.columns)
         self.nodes = pd.DataFrame()
 
         # Track if preprocessing steps have been completed
@@ -66,6 +67,22 @@ class ModelPipeline:
             "train_test_val_data_split_graph": False,
             "got_data_loaders": False,
         }
+        
+        # New tracking dictionaries and lists
+        self.initial_features = []
+        self.edge_features = []
+        self.node_features = []
+        self.scaled_edge_features = []
+        self.scaled_node_features = []
+        self.onehot_features = []
+        self.label_encoded_features = []
+        self.engineered_features = []
+        self.split_type = None
+        self.train_size = None
+        self.val_size = None
+        self.test_size = None
+        self.class_balance_stats = {}
+        self.num_nodes = {}
 
     #----------------------
     # Data summary
@@ -104,7 +121,7 @@ class ModelPipeline:
             "Payment Format": "payment_type",
             "Is Laundering": "is_laundering",
         }
-
+        
         # Ensure required columns exist
         missing_columns = [
             col
@@ -156,7 +173,7 @@ class ModelPipeline:
         self.df = add_sent_amount_usd(self.df, usd_conversion)
         # TODO: do we need received amount USD? Should be same as sent_amount_USD...
         # self.df = add_received_amount_usd(self.df, usd_conversion)
-
+        self.engineered_features += ['sent_amount_usd','log_currency_exchange']
         self.preprocessed["currency_features_extracted"] = True
 
     def extract_time_features(self) -> None:
@@ -184,7 +201,7 @@ class ModelPipeline:
         self.df = add_seconds_since_midnight(self.df)
         self.df = add_is_weekend(self.df)
         self.df = add_timestamp_int(self.df)
-        self.df = add_timestamp_scaled(self.df)
+        # self.df = add_timestamp_scaled(self.df) just scale _int version
 
         # Dropping timestamp ensures that the complex timestamp string
         # itself isn't used as a feature, as it is poorly suited to be
@@ -238,6 +255,7 @@ class ModelPipeline:
         self.df = add_time_diff_to(self.df)
         self.df = add_turnaround_time(self.df)
 
+        self.engineered_features += ['time_diff_from','time_diff_to','turnaround_time']
         self.preprocessed["additional_time_features_extracted"] = True
 
     def cyclical_encoding(self):
@@ -255,8 +273,9 @@ class ModelPipeline:
         self.df = cyclically_encode_feature(self.df, "time_of_day", "seconds_since_midnight")
         
         # Drop after encoding
-        self.df.drop(columns=["day_of_week", "seconds_since_midnight"], inplace=True)
+        self.df.drop(columns=["day_of_week", "hour_of_day", "seconds_since_midnight"], inplace=True)
 
+        self.engineered_features += ['time_of_day_sin','time_of_day_cos','day_sin','day_cos']
         self.preprocessed["cyclical_encoded"] = True
 
     def apply_one_hot_encoding(self, onehot_categorical_features=None):
@@ -309,6 +328,7 @@ class ModelPipeline:
         self.df = pd.concat([self.df] + encoded_dfs, axis=1)
 
         logging.info(f"One hot encoding applied to columns: {categorical_features}\n")
+        self.onehot_features = categorical_features
         self.preprocessed["onehot_encoded"] = True
         
     # TODO: need? 
@@ -347,9 +367,11 @@ class ModelPipeline:
         logging.info(f"Label encoding applied to columns: {categorical_features}\n")
         self.preprocessed["label_encoded"] = True
     
-    def numerical_scaling(self, numerical_features):
+    def numerical_scaling(self, numerical_features:list[str]):
         """Standardize Numerical Features"""
 
+        self.scaled_edge_features = numerical_features
+        
         std_scaler = StandardScaler()
 
         self.X_train[numerical_features] = std_scaler.fit_transform(self.X_train[numerical_features])
@@ -551,6 +573,22 @@ class ModelPipeline:
     # Splitting
     #-----------------
 
+    def get_split_indices(self):
+        """
+        Stores numpy arrays of appropriate indices based on validation
+        and test sizes
+        """
+
+        num_edges = len(self.df)
+
+        self.t1 = int(num_edges * (1 - self.val_size - self.test_size))
+        self.t2 = int(num_edges * (1 - self.test_size))
+        self.train_indices = np.arange(0, self.t1)
+        self.val_indices = np.arange(self.t1, self.t2)
+        self.test_indices = np.arange(self.t2, num_edges)
+        self.train_val_indices = np.concatenate([self.train_indices, self.val_indices])
+        self.train_val_test_indices = np.concatenate([self.train_val_indices, self.test_indices])
+    
     def split_train_test_val(
         self,
         X_cols=None,
@@ -578,20 +616,9 @@ class ModelPipeline:
 
         # Ensure a valid split is chosen
         valid_splits = ["random_stratified", "temporal", "temporal_agg"]
-        if split_type is None:
-            logging.info(
-                "No split type entered; using default split_type: "
-                "'random_stratified'"
-            )
-            logging.info("Valid split_type options:\n"
-                "- 'random_stratified' → Stratified random split maintaining label balance.\n"
-                "- 'temporal' → Sequential split based on timestamps.\n"
-                "- 'temporal_agg' → Aggregated sequential split (masking required in GNN evaluation).\n"
-                "See `split_train_test_val` for more details."
-            )
-            split_type = "random_stratified"
+        split_type = split_type or "random_stratified"
 
-        elif split_type not in valid_splits:
+        if split_type not in valid_splits:
             raise ValueError(
                 f"Invalid split_type: '{split_type}'.\n"
                 f"Expected one of {valid_splits}.\n"
@@ -603,33 +630,20 @@ class ModelPipeline:
             )
         self.split_type = split_type
 
-        # Allow `split_train_test_val` to default to using all columns
-        # for the set of `X_cols`
-        if X_cols is None:
-            X_cols = sorted(
-                list(
-                    set(self.df.columns) - set([
-                        # Remove identifying fields, as well as the
-                        # output `is_laundering`
-                        "from_account",
-                        "from_account_id",
-                        "from_account_idx",
-                        "from_bank",
-                        "is_laundering",
-                        "to_account",
-                        "to_account_id",
-                        "to_account_idx",
-                        "to_bank",
-                    ])
-                )
-            )
-        self.X_cols = X_cols
+        # Allow `split_train_test_val` to default to using all columns for the set of `X_cols`
+        cols = X_cols or self.df.columns
+         
+        # Remove identifying fields, as well as the output `is_laundering`
+        exclude_cols = {"from_bank", "to_bank", "from_account","to_account","from_account_idx", "to_account_idx","from_account_id","to_account_id","is_laundering"}
+        self.X_cols = list(set(cols) - exclude_cols)
+
         if self.should_keep_acct_idx():
-            self.X_cols = self.X_cols + ['from_account_idx','to_account_idx']
+            self.X_cols = list(set(self.X_cols) | {"from_account_idx", "to_account_idx"})
             print("Keeping from_account_idx and to_account_idx (for merging node feats onto tabular data for Catboost)")
-            
-        logging.info("Using the following set of 'X_cols'")
-        logging.info(self.X_cols)
+        else: 
+            self.X_cols = list(set(self.X_cols) - {"from_account_idx", "to_account_idx"})
+        
+        logging.info(f"Using the following set of 'X_cols'\n{self.X_cols}")
 
         if self.split_type == "random_stratified":
             X = self.df[self.X_cols]
@@ -642,83 +656,47 @@ class ModelPipeline:
                 X_temp, y_temp, test_size=test_size / (test_size + val_size), random_state=42, stratify=y_temp
             )
 
-        elif self.split_type == "temporal":
-            if "timestamp_int" not in self.df.columns:
-                raise RuntimeError("Need `timestamp_int` in df for temporal split. Review preprocessing steps.")
-
-            # Sort by time and find indices for data split
-            df_sorted = self.df.sort_values(by=["timestamp_int"])
-            X = df_sorted[self.X_cols]
-            y = df_sorted[y_col]
-            t1 = int((1-(test_size+val_size))*len(self.df))
-            t2 = int((1-test_size)*len(self.df))
-
-            # Split databased on timestamp
-            self.X_train, self.y_train = X[:t1], y[:t1]
-            self.X_val, self.y_val = X[t1:t2], y[t1:t2]
-            self.X_test, self.y_test = X[t2:], y[t2:]
-
-        elif self.split_type == "temporal_agg":
-            if "timestamp_int" not in self.df.columns:
-                raise RuntimeError("Must include timestamp_int in df for temporal split")
-
+        else: 
+            # Temporal splits ("temporal" and "temporal_agg")
             if "edge_id" not in self.df.columns:
-                raise RuntimeError("Must include edge_id in df for temporal split")
-
-            # Sort by time and find indices for data split
+                raise RuntimeError("Must include edge_id for temporal splits")
+            
+            # Sort by time (edge_id reflects first stored time sort)
+            self.df = self.df.sort_values(by='edge_id').reset_index(drop=True) # precautionary sort
             X = self.df[self.X_cols]
             y = self.df[y_col]
-            t1 = int((1-(test_size+val_size))*len(self.df))
-            t2 = int((1-test_size)*len(self.df))
+            
+            self.get_split_indices() 
 
-            # Temporal aggregated split (keeps earlier data but masks during GNN loss computation)
-            self.X_train, self.y_train = X[:t1], y[:t1]
-            self.X_val, self.y_val = X[:t2], y[:t2]
-            self.X_test, self.y_test = X[:], y[:]
+            # Split databased on timestamp
+            if self.split_type == "temporal":
+                self.X_train, self.y_train = X.iloc[self.train_indices], y.iloc[self.train_indices]
+                self.X_val, self.y_val = X.iloc[self.val_indices], y.iloc[self.val_indices]
+                self.X_test, self.y_test = X.iloc[self.test_indices], y.iloc[self.test_indices]
+            
+            elif self.split_type == "temporal_agg":
+                # Temporal aggregated split (keeps earlier data but masks during GNN loss computation)
+                self.X_train, self.y_train = X.iloc[self.train_indices], y.iloc[self.train_indices]
+                self.X_val, self.y_val = X.iloc[self.train_val_indices], y.iloc[self.train_val_indices]
+                self.X_test, self.y_test = X, y # whole df
 
         logging.info(f"Data split using {self.split_type} method.")
+        
         if self.split_type == "temporal_agg":
             logging.info("Remember to mask labels in GNN evaluation.\n"
                 " - Train: no mask \n"
                 " - Val: mask y_lab[:t1] (only evaluate labels y_lab[t1:t2]) \n"
                 " - Test: mask y_lab[:t2] (only evaluate labels y_lab[t2:])")
 
+        self.class_balance_stats = {
+            "train": self.y_train.value_counts(normalize=True).to_dict(),
+            "val": self.y_val.value_counts(normalize=True).to_dict(),
+            "test": self.y_test.value_counts(normalize=True).to_dict()
+        }
+        self.train_size = len(self.X_train)
+        self.val_size = len(self.X_val)
+        self.test_size = len(self.X_test)
         self.preprocessed["train_test_val_data_split"] = True
-
-        # This assumes we should just always get (and attach to the
-        # pipeline) the split indices
-        self.get_split_indices()
-
-    def get_split_indices(self):
-        """
-        Returns numpy arrays of appropriate indices based on validation
-        and test sizes
-        """
-        if not self.preprocessed["train_test_val_data_split"]:
-            raise RuntimeError(
-                "Data must have been split into train, test, validation "
-                "sets before getting split indices."
-            )
-
-        num_edges = len(self.df)
-
-        self.t1 = int(num_edges * (1 - self.val_size - self.test_size))
-        self.t2 = int(num_edges * (1 - self.test_size))
-        self.train_indices = np.arange(0, self.t1)
-        self.val_indices = np.arange(self.t1, self.t2)
-        self.test_indices = np.arange(self.t2, num_edges)
-        self.train_val_indices = np.concatenate([self.train_indices, self.val_indices])
-        self.train_val_test_indices = np.concatenate([self.train_val_indices, self.test_indices])
-
-        return (
-            self.t1,
-            self.t2,
-            self.train_indices,
-            self.val_indices,
-            self.test_indices,
-            self.train_val_indices,
-            self.train_val_test_indices,
-        )
 
     def compute_split_specific_node_features(
         self,
@@ -821,7 +799,7 @@ class ModelPipeline:
             node_df = pd.merge(node_graph_df, node_stat_features, on="node_id", how="outer")
             node_df.fillna(0, inplace=True)
             node_df = node_df.sort_values("node_id").reset_index(drop=True)
-
+            
             print(f"✅ Computed node features for {split_name} with {len(node_df)} nodes.")
             return node_df
 
@@ -841,6 +819,7 @@ class ModelPipeline:
             split_name="test",
             graph_features=graph_features
         )
+        self.num_nodes = {"train":len(self.train_nodes),"val":len(self.val_nodes),"test":len(self.test_nodes)}
 
         self.preprocessed["post_split_node_features"] = True
 
@@ -887,6 +866,23 @@ class ModelPipeline:
                     col_vals = df[col].copy()
                     col_vals[col_vals == -1] = train_median
                     df[col] = scalers[col][0].transform(col_vals.values.reshape(-1, 1)).flatten()
-
+        
+        self.scaled_node_features += cols_to_scale
         self.preprocessed["node_datasets_scaled"] = True
   
+    def pipeline_summary(self):
+        print("📋 Pipeline Summary:")
+        print(f"- Dataset Path: {self.dataset_path}")
+        print(f"- Split Type: {self.split_type}")
+        print(f"- Sizes: Train={self.train_size}, Val={self.val_size}, Test={self.test_size}")
+        print(f"- Laundering Proportion:")
+        for split, stats in self.class_balance_stats.items():
+            print(f"  {split}: {stats}")
+        print(f"- Edge Features: {self.edge_features}")
+        print(f"- Node Features: {self.node_features}")
+        print(f"- Scaled Edge Features: {self.scaled_edge_features}")
+        print(f"- Scaled Node Features: {self.scaled_node_features}")
+        print(f"- One-hot Encoded Features: {self.onehot_features}")
+        print(f"- Label Encoded Features: {self.label_encoded_features}")
+        print(f"- Engineered Features: {self.engineered_features}")
+        print()

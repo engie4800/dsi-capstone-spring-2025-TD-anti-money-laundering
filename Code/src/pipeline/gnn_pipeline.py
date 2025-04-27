@@ -32,6 +32,10 @@ from pipeline.checks import Checker
 class GNNPipeline(ModelPipeline):
     def __init__(self, data_file):
         super().__init__(data_file)
+        self.num_nodes_overall = None
+        self.num_nodes_train = None
+        self.num_nodes_val = None
+        self.num_nodes_test = None
     
     def should_keep_acct_idx(self):
         return False
@@ -49,13 +53,11 @@ class GNNPipeline(ModelPipeline):
         self.df.sort_values("edge_id", inplace=True)
         self.df.reset_index(drop=True, inplace=True)
 
-        # A default set of edge features that excludes some obvious
-        # features we don't want
-        if edge_features is None:
-            # TODO: any reason not to do this? 
-            self.edge_features = ['edge_id'] + [col for col in self.X_cols if col != 'edge_id'] 
-        else:
-            self.edge_features = edge_features
+        # Prereq: make edge_id first col, exclude some standard feats (if not already excluded)
+        exclude_cols = {"edge_id", "from_bank", "to_bank", "from_account_idx", "to_account_idx"}
+        cols = self.X_cols if edge_features is None else edge_features
+        self.edge_features = ['edge_id'] + [col for col in cols if col not in exclude_cols]
+
         # Nodes
         tr_x = torch.tensor(self.train_nodes.drop(columns="node_id").values, dtype=torch.float)
         val_x = torch.tensor(self.val_nodes.drop(columns="node_id").values, dtype=torch.float)
@@ -109,7 +111,7 @@ class GNNPipeline(ModelPipeline):
         if edge_features_to_scale is None:
             self.scaled_edge_features = [
                 "sent_amount_usd",
-                "timestamp_scaled",
+                "timestamp_int",
                 "time_diff_from",
                 "time_diff_to",
                 "turnaround_time",

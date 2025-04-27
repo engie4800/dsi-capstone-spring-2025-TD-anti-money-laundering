@@ -47,7 +47,7 @@ class CatBoostPipeline(ModelPipeline):
             txns_df = txns_df.merge(sender_feats, on="from_account_idx", how="left")
             txns_df = txns_df.merge(receiver_feats, on="to_account_idx", how="left")
             
-            txns_df.drop(columns=['from_account_idx','to_account_idx'])
+            txns_df = txns_df.drop(columns=['from_account_idx','to_account_idx'])
 
             return txns_df
 
@@ -58,6 +58,6 @@ class CatBoostPipeline(ModelPipeline):
     def scale_edge_features(self, edge_features_to_scale:list[str]):
         return super().numerical_scaling(edge_features_to_scale)
        
-    def run_model_specific_steps(self, edge_features_to_scale):
+    def run_model_specific_steps(self, edge_features_to_scale:list[str]):
         self.scale_edge_features(edge_features_to_scale)
         self.add_node_graph_features_to_df()
