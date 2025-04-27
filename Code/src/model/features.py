@@ -11,14 +11,14 @@ let them only worry about adding features).
 import numpy as np
 import pandas as pd
 
-
-def add_currency_changed(df: pd.DataFrame) -> pd.DataFrame:
-    """Adds the `currency_changed` feature, which is an indicator of
-    whether the currency changes within each transaction
+def add_currency_exchange(df: pd.DataFrame) -> pd.DataFrame:
+    """Add `log_exchange_rate` feature, which is log(sent/received) 
+    and is an indicator of way of currency conversion (to lower or higher-val currency).
+    Log functions as stabilizer to clip extreme vals.
     """
-    df["currency_changed"] = (
-        df["sent_currency"] != df["received_currency"]
-    ).astype(int)
+    df['exchange_rate'] = abs(df['sent_amount']/df['received_amount'])
+    df['log_exchange_rate'] = np.log1p(df['exchange_rate']).clip(0,1000)
+    df.drop(columns='exchange_rate',inplace=True)
     return df
 
 
@@ -120,6 +120,27 @@ def add_time_diff_from(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_time_diff_to(df: pd.DataFrame) -> pd.DataFrame:
+    """Adds the `time_diff_to` feature, which is the time elapsed
+    since the receiver in a given transaction previously received money
+    """
+    # Ensures data is sorted by timestamp
+    df = df.sort_values(
+        by=["to_account_idx", "timestamp_int"]
+    ).reset_index(drop=True)
+
+    # Computes the `time_diff_from`, replacing `nan` values with `-1`
+    # to represent missing values
+    df["time_diff_to"] = df.groupby("to_account_idx")["timestamp_int"].diff()
+    df["time_diff_to"] = df["time_diff_to"].fillna(-1)
+
+    # Sort by `edge_id`, which is how the dataframe should have been
+    # sorted prior to adding this feature
+    df = df.sort_values(by="edge_id").reset_index(drop=True)
+
+    return df
+
+
 def add_turnaround_time(df: pd.DataFrame) -> pd.DataFrame:
     """Adds the `turnaround_time` feature, which is the time elapsed
     since the sender in a given transaction has received money
@@ -204,6 +225,7 @@ def add_unique_identifiers(df: pd.DataFrame) -> pd.DataFrame:
         ],
         inplace=True,
     )
+    df = df.sort_values(by='edge_id').reset_index(drop=True)
 
     return df
 

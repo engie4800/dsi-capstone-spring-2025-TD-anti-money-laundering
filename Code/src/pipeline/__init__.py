@@ -11,9 +11,10 @@ import torch.nn as nn
 from IPython.display import display
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
-from torch_geometric.data import Data
 from torch_geometric.explain import Explainer, GNNExplainer
+from torch_geometric.data import Data
 from torch_geometric.loader import LinkNeighborLoader
+from torch_geometric.nn import GINEConv
 from torch.optim import Adam
 from torchmetrics.classification import (
     BinaryAccuracy,
@@ -23,13 +24,13 @@ from torchmetrics.classification import (
     BinaryAveragePrecision,
 )
 from tqdm import tqdm
+import logging
 
 from explain import GNNEdgeExplainer
 from helpers.currency import get_usd_conversion
-from helpers.graph import scale_graph_edge_attributes
 from model import GINe
 from model.features import (
-    add_currency_changed,
+    add_currency_exchange,
     add_day_of_week,
     add_hour_of_day,
     add_is_weekend,
@@ -37,6 +38,7 @@ from model.features import (
     add_seconds_since_midnight,
     add_sent_amount_usd,
     add_time_diff_from,
+    add_time_diff_to,
     add_timestamp_int,
     add_timestamp_scaled,
     add_turnaround_time,
@@ -48,7 +50,6 @@ from pipeline.checks import Checker
 if TYPE_CHECKING:
     from torch_geometric.explain import Explanation
 
-
 class ModelPipeline:
 
     def __init__(self, dataset_path: str):
@@ -58,9 +59,6 @@ class ModelPipeline:
         self.dataset_path = dataset_path
         self.df = pd.read_csv(self.dataset_path)
         self.nodes = pd.DataFrame()
-
-        # Which device will model computation occur on?
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         # Track if preprocessing steps have been completed
         self.preprocessed = {
@@ -114,7 +112,7 @@ class ModelPipeline:
             "Is Laundering": "is_laundering",
         }
 
-        # Ensures required columns exist
+        # Ensure required columns exist
         missing_columns = [
             col
             for col in column_mapping.keys()
@@ -152,8 +150,7 @@ class ModelPipeline:
         """
         Extract all currency-related features
 
-            currency_changed: Whether the money in the transaction
-                changes currency from sender to receiver
+            currency_exchange: exchange rate from sent to received
             add_sent_amount_usd: Sent amount in USD
             add_received_amount_usd: Received amount in USD
 
@@ -161,10 +158,11 @@ class ModelPipeline:
         logging.info("Extracting currency features...")
         Checker.currency_columns_required(self)
 
-        self.df = add_currency_changed(self.df)
+        self.df = add_currency_exchange(self.df)
         usd_conversion = get_usd_conversion(self.dataset_path)
         self.df = add_sent_amount_usd(self.df, usd_conversion)
-        self.df = add_received_amount_usd(self.df, usd_conversion)
+        # TODO: do we need received amount USD? Should be same as sent_amount_USD...
+        # self.df = add_received_amount_usd(self.df, usd_conversion)
 
         self.preprocessed["currency_features_extracted"] = True
 
@@ -242,8 +240,9 @@ class ModelPipeline:
 
         # TODO: does it make sense to add an analogous `time_diff_to`
         # representing the time since the receiver in a transaction
-        # previously received money?
+        # previously received money? Sure
         self.df = add_time_diff_from(self.df)
+        self.df = add_time_diff_to(self.df)
         self.df = add_turnaround_time(self.df)
 
         self.preprocessed["additional_time_features_extracted"] = True
@@ -261,15 +260,10 @@ class ModelPipeline:
         Checker.time_features_were_extracted(self)
         self.df = cyclically_encode_feature(self.df, "day", "day_of_week")
         self.df = cyclically_encode_feature(self.df, "time_of_day", "seconds_since_midnight")
-
-        # TODO: the `day_of_week` and `seconds_since_midnight` features
-        # (in this case) are now represented cyclically. Should we
-        # consider:
-        #
-        #   Removing the `day_of_week` and `seconds_since_midnight`
-        #   features, as they are now represented in the cyclical features?
-        #
         
+        # Drop after encoding
+        self.df.drop(columns=["day_of_week", "seconds_since_midnight"], inplace=True)
+
         self.preprocessed["cyclical_encoded"] = True
 
     def apply_one_hot_encoding(self, onehot_categorical_features=None):
@@ -465,9 +459,15 @@ class ModelPipeline:
         # Adding the new features to the main nodes dataframe
         self.nodes = pd.merge(self.nodes, temp_node_df, on="node_id", how="outer")
 
+    # TODO: do we need this anymore? Further, how can we ensure other method also allows for no node feats?
     def extract_nodes(self, node_features=None, graph_related_features=None):
         """Extract nodes (x) data that is used across splits"""
-        Checker.unique_ids_were_created(self)
+
+        # Ensure that unique_ids have been generated
+        if not self.preprocessed["unique_ids_created"]:
+            raise RuntimeError(
+                "Unique account IDs must be created before computing network features"
+            )
 
         logging.info("Extracting nodes...")
 
@@ -488,6 +488,7 @@ class ModelPipeline:
         if self.nodes.shape[1] == 1:
             self.nodes["placeholder"] = 1
 
+    # TODO: Do we need this anymore?
     def generate_tensors(self, edge_features, node_features=None, edges = ["from_account_idx", "to_account_idx"]):
         """Convert data to PyTorch tensor format for GNNs"""
         logging.info("Generating tensors...")
@@ -532,8 +533,11 @@ class ModelPipeline:
             self.create_unique_ids()
             self.extract_additional_time_features()
             self.cyclical_encoding()
-            self.apply_label_encoding()
+            # TODO: do we need label encoding any more? I thought we decided 
+            # not to include to/from bank as feature bc of high dimensionality
+            # self.apply_label_encoding()
             self.apply_one_hot_encoding()
+            # Do we need this? or no because done in node split process?
             if graph_feats:
                 self.extract_graph_features()
             logging.info("Preprocessing completed successfully!")
@@ -549,6 +553,7 @@ class ModelPipeline:
         test_size=0.15,
         val_size=0.15,
         split_type="random_stratified",
+        keep_account_idx = False
     ):
         """Perform Train-Test-Validation Split
 
@@ -615,6 +620,10 @@ class ModelPipeline:
                 )
             )
         self.X_cols = X_cols
+        if not keep_account_idx:
+            self.X_cols = self.X_cols + ['from_account_idx','to_account_idx']
+            print("Keeping from_account_idx and to_account_idx (for merging node feats onto tabular data for Catboost)")
+            
         logging.info("Using the following set of 'X_cols'")
         logging.info(self.X_cols)
 
@@ -630,7 +639,8 @@ class ModelPipeline:
             )
 
         elif self.split_type == "temporal":
-            Checker.time_features_were_extracted(self)  # timestamp_int required
+            if "timestamp_int" not in self.df.columns:
+                raise RuntimeError("Need `timestamp_int` in df for temporal split. Review preprocessing steps.")
 
             # Sort by time and find indices for data split
             df_sorted = self.df.sort_values(by=["timestamp_int"])
@@ -645,8 +655,11 @@ class ModelPipeline:
             self.X_test, self.y_test = X[t2:], y[t2:]
 
         elif self.split_type == "temporal_agg":
-            Checker.time_features_were_extracted(self)  # timestamp_int required
-            Checker.unique_ids_were_created(self)  # edge_id required
+            if "timestamp_int" not in self.df.columns:
+                raise RuntimeError("Must include timestamp_int in df for temporal split")
+
+            if "edge_id" not in self.df.columns:
+                raise RuntimeError("Must include edge_id in df for temporal split")
 
             # Sort by time and find indices for data split
             X = self.df[self.X_cols]
@@ -679,7 +692,11 @@ class ModelPipeline:
         Returns numpy arrays of appropriate indices based on validation
         and test sizes
         """
-        Checker.data_split_to_train_val_test(self)
+        if not self.preprocessed["train_test_val_data_split"]:
+            raise RuntimeError(
+                "Data must have been split into train, test, validation "
+                "sets before getting split indices."
+            )
 
         num_edges = len(self.df)
 
@@ -688,8 +705,8 @@ class ModelPipeline:
         self.train_indices = np.arange(0, self.t1)
         self.val_indices = np.arange(self.t1, self.t2)
         self.test_indices = np.arange(self.t2, num_edges)
-        self.train_val_indices = np.concat([self.train_indices, self.val_indices])
-        self.train_val_test_indices = np.concat([self.train_val_indices, self.test_indices])
+        self.train_val_indices = np.concatenate([self.train_indices, self.val_indices])
+        self.train_val_test_indices = np.concatenate([self.train_val_indices, self.test_indices])
 
         return (
             self.t1,
@@ -713,9 +730,6 @@ class ModelPipeline:
         Checker.data_split_to_train_val_test(self)
 
         def get_node_features(split_df, split_name: str, graph_features):
-            # TODO: this duplicates to some extent some of the other
-            # graph feature functions on the pipeline, which we can
-            # clean up?
             logging.info(f"Computing {split_name} node features...")
 
             # --- TRANSACTIONAL NODE FEATURES ---
@@ -723,7 +737,7 @@ class ModelPipeline:
             # Outgoing stats (from_account_idx)
             out_stats = (
                 split_df.groupby("from_account_idx")["sent_amount_usd"]
-                    .agg(["count", "sum", "mean", "std", "min", "max"])
+                    .agg(["sum", "mean", "std"])
                     .add_prefix("out_")
                     .reset_index()
                     .rename(columns={"from_account_idx": "node_id"})
@@ -732,7 +746,7 @@ class ModelPipeline:
             # Incoming stats (to_account_idx)
             in_stats = (
                 split_df.groupby("to_account_idx")["sent_amount_usd"]
-                    .agg(["count", "sum", "mean", "std", "min", "max"])
+                    .agg(["sum", "mean", "std"])
                     .add_prefix("in_")
                     .reset_index()
                     .rename(columns={"to_account_idx": "node_id"})
@@ -762,7 +776,20 @@ class ModelPipeline:
             node_stat_features["net_flow"] = node_stat_features["out_sum"] - node_stat_features["in_sum"]
             node_stat_features["avg_txn_in"] = node_stat_features["in_mean"]
             node_stat_features["avg_txn_out"] = node_stat_features["out_mean"]
-
+            node_stat_features["std_txn_in"] = node_stat_features["in_std"]
+            node_stat_features["std_txn_out"] = node_stat_features["out_std"]
+            
+            node_stat_features = node_stat_features[[
+                "node_id",
+                "net_flow",
+                "avg_txn_out",
+                "avg_txn_in",
+                "std_txn_out",
+                "std_txn_in",
+                "num_unique_out_partners",
+                "num_unique_in_partners",
+            ]]
+            
             # --- GRAPH-BASED NODE FEATURES ---
 
             aggregated_edges = (
@@ -781,14 +808,10 @@ class ModelPipeline:
                 )
 
             degree_centrality = nx.degree_centrality(G)
-            in_deg = {n: d / (len(G) - 1) for n, d in G.in_degree()}
-            out_deg = {n: d / (len(G) - 1) for n, d in G.out_degree()}
             pagerank = nx.pagerank(G, weight="sent_amount_usd")
 
             node_graph_df = pd.DataFrame({"node_id": list(G.nodes)})
             node_graph_df["degree_centrality"] = node_graph_df["node_id"].map(degree_centrality)
-            node_graph_df["in_degree"] = node_graph_df["node_id"].map(in_deg)
-            node_graph_df["out_degree"] = node_graph_df["node_id"].map(out_deg)
             node_graph_df["pagerank"] = node_graph_df["node_id"].map(pagerank)
 
             # --- COMBINE ALL FEATURES ---
@@ -800,11 +823,7 @@ class ModelPipeline:
             print(f"✅ Computed node features for {split_name} with {len(node_df)} nodes.")
             return node_df
 
-        self.nodes = get_node_features(
-            split_df=self.df,
-            split_name="all",
-            graph_features=graph_features,
-        )
+        # Compute for train, val, test separately
         self.train_nodes = get_node_features(
             split_df=self.df.loc[self.train_indices, :],
             split_name="train",
@@ -848,146 +867,136 @@ class ModelPipeline:
                 "pagerank",
             ]))
 
-        nodes = self.nodes.copy()
-        train_nodes = self.train_nodes.copy()
-        val_nodes = self.val_nodes.copy()
-        test_nodes = self.test_nodes.copy()
-
         scalers = {}
 
         for col in cols_to_scale:
-
             # Impute -1 in train
-            train_col, train_median = preprocess_column(train_nodes[col])
-            train_nodes[col] = train_col
+            train_col, train_median = preprocess_column(self.train_nodes[col])
+            self.train_nodes[col] = train_col
 
             # Fit scaler on train
             scaler = StandardScaler()
-            train_nodes[col] = scaler.fit_transform(train_nodes[col].values.reshape(-1, 1)).flatten()
+            self.train_nodes[col] = scaler.fit_transform(self.train_nodes[col].values.reshape(-1, 1)).flatten()
             scalers[col] = (scaler, train_median)
 
-            # Impute -1 in val/test with train median.
-            # TODO: we also impute all nodes here, does this make sense
-            # and is it necessary? We are processing all nodes because
-            # interpreting the GNN requires an input `x` that doesn't
-            # seem to be defined yet. I'm interpreting the `x` we need
-            # to be the one defined in `split_train_test_val_graph`,
-            # but that assumption should be confirmed
-            for df in [nodes, val_nodes, test_nodes]:
+            # Impute -1 in val/test with train median
+            for df in [self.val_nodes, self.test_nodes]:
                 if col in df.columns:
                     col_vals = df[col].copy()
                     col_vals[col_vals == -1] = train_median
                     df[col] = scalers[col][0].transform(col_vals.values.reshape(-1, 1)).flatten()
 
-        # TODO: do we need to have ever copied these, or could we just
-        # use / update them in place?
-        self.nodes = nodes
-        self.train_nodes = train_nodes
-        self.val_nodes = val_nodes
-        self.test_nodes = test_nodes
-
         self.preprocessed["node_datasets_scaled"] = True
 
         return self.train_nodes, self.val_nodes, self.test_nodes
+    
+    
+    def add_node_graph_feats_to_df(self, node_feat_cols=None):
+        """
+        Used for non-GNN model (e.g., CatBoost).
+        Merge node-level graph features (e.g., pagerank, degree_centrality)
+        into the transaction DataFrames (X_train, X_val, X_test) for both sender and receiver.
 
+        Args:
+            node_feat_cols (list or None): List of node feature columns to merge (excluding 'node_id').
+                                        If None, will use all columns in node DataFrames except
+                                        a "node_id"
+        """
+        if 'from_account_idx' not in self.X_train.columns:
+            raise RuntimeError("To add node feats to tabular df, need from_account_idx and to_account_idx")
+        
+        if node_feat_cols is None:
+            node_feat_cols = [col for col in self.train_nodes.columns if col != 'node_id']
+
+        def merge_feats(txns_df, nodes_df):
+            if "node_id" not in nodes_df.columns:
+                raise ValueError("Each nodes_df must include a 'node_id' column")
+
+            # Sender node features
+            sender_feats = nodes_df[["node_id"] + node_feat_cols].copy()
+            sender_feats = sender_feats.rename(columns={col: f"from_{col}" for col in node_feat_cols})
+            sender_feats = sender_feats.rename(columns={"node_id": "from_account_idx"})
+
+            # Receiver node features
+            receiver_feats = nodes_df[["node_id"] + node_feat_cols].copy()
+            receiver_feats = receiver_feats.rename(columns={col: f"to_{col}" for col in node_feat_cols})
+            receiver_feats = receiver_feats.rename(columns={"node_id": "to_account_idx"})
+
+            # Merge into transaction dataframe
+            txns_df = txns_df.merge(sender_feats, on="from_account_idx", how="left")
+            txns_df = txns_df.merge(receiver_feats, on="to_account_idx", how="left")
+            
+            txns_df.drop(columns=['from_account_idx','to_account_idx'])
+
+            return txns_df
+
+        self.X_train = merge_feats(self.X_train, self.train_nodes)
+        self.X_val = merge_feats(self.X_val, self.val_nodes)
+        self.X_test = merge_feats(self.X_test, self.test_nodes)
+
+        return self.X_train, self.X_val, self.X_test
+
+    
+    
     def split_train_test_val_graph(self, edge_features=None):
+        """Creates graph objects for use in GNN.
+        """
         logging.info("Splitting into train, test, validation graphs")
         Checker.train_val_test_node_features_added(self)
+        
+        # make sure sorted
+        self.df.sort_values("edge_id", inplace=True)
+        self.df.reset_index(drop=True, inplace=True)
 
         # A default set of edge features that excludes some obvious
         # features we don't want
         if edge_features is None:
-            # TODO: any reason not to do this?
-            # edge_features = self.X_cols
-            # For now, the features defined in the latest baseline:
-            edge_features = [
-                "edge_id",
-                "sent_amount_usd",
-                "received_amount_usd",
-                "timestamp_scaled",
-                "time_diff_from",
-                "turnaround_time",
-                "day_sin",
-                "day_cos",
-                "time_of_day_sin",
-                "time_of_day_cos",
-                "payment_type_ACH",
-                "currency_changed",
-                "received_currency_Australian Dollar",
-                "received_currency_Brazil Real",
-                "received_currency_Canadian Dollar",
-                "received_currency_Euro",
-                "received_currency_Mexican Peso",
-                "received_currency_Ruble",
-                "received_currency_Saudi Riyal",
-                "received_currency_Shekel",
-                "received_currency_Swiss Franc",
-                "received_currency_UK Pound",
-                "received_currency_US Dollar",
-                "received_currency_Yuan",
-                "sent_currency_Canadian Dollar",
-                "sent_currency_Euro",
-                "sent_currency_Mexican Peso",
-                "sent_currency_Rupee",
-                "sent_currency_Saudi Riyal",
-                "sent_currency_Shekel",
-                "sent_currency_Swiss Franc",
-                "sent_currency_UK Pound",
-                "sent_currency_US Dollar",
-                "sent_currency_Yuan",
-            ]
-        self.edge_features = edge_features
-
+            # TODO: any reason not to do this? 
+            self.edge_features = ['edge_id'] + [col for col in self.X_cols if col != 'edge_id'] 
+        else:
+            self.edge_features = edge_features
         # Nodes
-        self.x = torch.tensor(self.nodes.drop(columns="node_id").values, dtype=torch.float).to(self.device)
-        tr_x = torch.tensor(self.train_nodes.drop(columns="node_id").values, dtype=torch.float).to(self.device)
-        val_x = torch.tensor(self.val_nodes.drop(columns="node_id").values, dtype=torch.float).to(self.device)
-        te_x = torch.tensor(self.test_nodes.drop(columns="node_id").values, dtype=torch.float).to(self.device)
+        tr_x = torch.tensor(self.train_nodes.drop(columns="node_id").values, dtype=torch.float)
+        val_x = torch.tensor(self.val_nodes.drop(columns="node_id").values, dtype=torch.float)
+        te_x = torch.tensor(self.test_nodes.drop(columns="node_id").values, dtype=torch.float)
 
         # Labels
-        self.y = torch.LongTensor(self.df["is_laundering"].to_numpy()).to(self.device)
+        self.y = torch.LongTensor(self.df["is_laundering"].to_numpy())
 
         # Edge index
-        self.edge_index = torch.LongTensor(self.df[["from_account_idx", "to_account_idx"]].to_numpy().T).to(self.device)
+        self.edge_index = torch.LongTensor(self.df[["from_account_idx", "to_account_idx"]].to_numpy().T)
 
         # Edge attr
-        edge_attr = torch.tensor(self.df[edge_features].to_numpy(), dtype=torch.float).to(self.device)
+        edge_attr = torch.tensor(self.df[self.edge_features].to_numpy(), dtype=torch.float)
 
         # Overwrites the values we got from the original split
-        self.train_indices = torch.tensor(self.train_indices).to(self.device)
-        self.val_indices = torch.tensor(self.val_indices).to(self.device)
-        self.test_indices = torch.tensor(self.test_indices).to(self.device)
+        self.train_indices = torch.tensor(self.train_indices)
+        self.val_indices = torch.tensor(self.val_indices)
+        self.test_indices = torch.tensor(self.test_indices)
 
-        cat_tr_val_inds = torch.cat((self.train_indices, self.val_indices)).to(self.device)
-        self.data = Data(
-            x=self.x,
-            edge_index=self.edge_index,
-            edge_attr=edge_attr,
-            y=self.y,
-        ).to(self.device)
+        cat_tr_val_inds = torch.cat((self.train_indices, self.val_indices))
         self.train_data = Data(
             x=tr_x,
             edge_index=self.edge_index[:,self.train_indices],
             edge_attr=edge_attr[self.train_indices],
             y=self.y[self.train_indices],
-        ).to(self.device)
+        )
         self.val_data = Data(
             x=val_x,
             edge_index=self.edge_index[:,cat_tr_val_inds],
             edge_attr=edge_attr[cat_tr_val_inds],
             y=self.y[cat_tr_val_inds],
-        ).to(self.device)
+        )
         self.test_data = Data(
             x=te_x,
-            # TODO: should this not be the full edge index, edge
-            # attributes, and y?
             edge_index=self.edge_index,
             edge_attr=edge_attr,
             y=self.y,
-        ).to(self.device)
+        )
 
         self.preprocessed["train_test_val_data_split_graph"] = True
-
+        
+        # TODO: again, do we need to return this stuff or nah
         return (
             self.train_indices,
             self.val_indices,
@@ -998,16 +1007,72 @@ class ModelPipeline:
             self.edge_index,
             self.y,
         )
+        
+    def scale_edge_features(self, edge_features_to_scale: list[str]):
+        """
+        Scale and impute edge features in train/val/test data in place.
+        Uses training set to fit scalers, then applies to all sets.
+        """
+        logging.info("Scaling edge features: %s", edge_features_to_scale)
+        
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        if edge_features_to_scale is None:
+            self.scaled_edge_features = [
+                "sent_amount_usd",
+                "timestamp_scaled",
+                "time_diff_from",
+                "time_diff_to",
+                "turnaround_time",
+            ]
+        else:
+            self.scaled_edge_features = edge_features_to_scale
+        
+        scalers = {}
+        train_edge_attr = self.train_data.edge_attr.cpu().numpy()
+        val_edge_attr = self.val_data.edge_attr.cpu().numpy()
+        test_edge_attr = self.test_data.edge_attr.cpu().numpy()
+        
+        # Map feature name to index
+        feature_idx_map = {name: i for i, name in enumerate(self.edge_features)}
+
+        for feature in self.scaled_edge_features:
+            col_idx = feature_idx_map[feature] 
+            train_vals = train_edge_attr[:, col_idx]
+            mask = train_vals != -1
+            if np.sum(mask) == 0:
+                logging.warning(f"All values -1 for {feature}; skipping.")
+                continue
+
+            median_val = np.median(train_vals[mask])
+            train_vals[~mask] = median_val
+
+            scaler = StandardScaler()
+            train_scaled = scaler.fit_transform(train_vals.reshape(-1, 1)).flatten()
+
+            # Apply to val/test
+            for edge_attr in [val_edge_attr, test_edge_attr]:
+                col = edge_attr[:, col_idx]
+                col[col == -1] = median_val
+                edge_attr[:, col_idx] = scaler.transform(col.reshape(-1, 1)).flatten()
+
+            train_edge_attr[:, col_idx] = train_scaled
+            scalers[feature] = scaler # TODO: do we need to return the scalars? why do we have this?
+
+        self.train_data.edge_attr = torch.tensor(train_edge_attr, dtype=torch.float32, device=self.device)
+        self.val_data.edge_attr = torch.tensor(val_edge_attr, dtype=torch.float32, device=self.device)
+        self.test_data.edge_attr = torch.tensor(test_edge_attr, dtype=torch.float32, device=self.device)
+
+        return scalers
+
 
     def get_data_loaders(self, num_neighbors=[100,100], batch_size=8192):
         logging.info("Getting data loaders")
         Checker.graph_data_split_to_train_val_test(self)
 
-        # Standard scale on CPU before sending to device
-        columns_to_scale = [1, 2, 3, 4, 5]  # TODO: what are these? Why scale these specifically?
-        self.train_data = scale_graph_edge_attributes(self.train_data, columns_to_scale)
-        self.val_data = scale_graph_edge_attributes(self.val_data, columns_to_scale)
-        self.test_data = scale_graph_edge_attributes(self.test_data, columns_to_scale)
+        # TODO: might be able to move this to somewhere more meaningful,
+        # but it is needed here at the latest
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         self.train_loader = LinkNeighborLoader(
             data=self.train_data,
@@ -1118,8 +1183,9 @@ class ModelPipeline:
             edge_ids_in_batch = batch.edge_attr[:, 0].detach().cpu().numpy()
             mask = torch.isin(torch.tensor(edge_ids_in_batch), torch.tensor(seed_edge_ids)).to(self.device)
 
-            batch_edge_attr = batch.edge_attr[:, 1:].clone()
             batch = batch.to(self.device)
+            batch_edge_attr = batch.edge_attr[:, 1:].clone()
+            
 
             logits = self.model(batch.x, batch.edge_index, batch_edge_attr).view(-1)[mask]
             target = batch.y[mask]
@@ -1171,9 +1237,10 @@ class ModelPipeline:
                 seed_edge_ids = self.df.loc[global_seed_inds.cpu().numpy(), "edge_id"].values
                 edge_ids_in_batch = batch.edge_attr[:, 0].detach().cpu().numpy()
                 mask = torch.isin(torch.tensor(edge_ids_in_batch), torch.tensor(seed_edge_ids)).to(self.device)
-
-                batch_edge_attr = batch.edge_attr[:, 1:].clone()
+                
                 batch = batch.to(self.device)
+                batch_edge_attr = batch.edge_attr[:, 1:].clone()
+                
                 logits = self.model(batch.x, batch.edge_index, batch_edge_attr).view(-1)[mask]
                 target = batch.y[mask]
                 probs = torch.sigmoid(logits)
