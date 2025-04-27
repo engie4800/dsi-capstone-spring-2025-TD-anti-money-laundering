@@ -26,6 +26,7 @@ from torchmetrics.classification import (
 from tqdm import tqdm
 import logging
 
+from explain import GNNEdgeExplainer
 from helpers.currency import get_usd_conversion
 from model import GINe
 from model.features import (
@@ -1124,6 +1125,13 @@ class ModelPipeline:
         self.epochs = epochs
         self.patience = patience
 
+        # Since `initialize_training` is run after preprocessing is
+        # done, we can define the node and edge features here. This
+        # does assume that column ordering between data frames and
+        # tensors is preserved, and it removes node and edge id
+        self.node_feature_labels = self.nodes.drop(columns="node_id").columns
+        self.edge_feature_labels = self.df[self.edge_features].drop(columns="edge_id").columns
+
         # Metrics used during training and evaluation
         self.metrics = SimpleNamespace(
             accuracy=BinaryAccuracy(threshold=threshold).to(self.device),
@@ -1302,7 +1310,14 @@ class ModelPipeline:
         Run after model training is complete to create an explainer for
         GNN interpretability
         """
-        self.explainer = Explainer(
+        self.explainer = GNNEdgeExplainer(
+            model=self.model,
+            n_node_feats=self.x.size(1),
+            n_edge_feats=self.data.edge_attr.size(1) - 1,  # Minus `edge_id`
+            epochs=epochs,
+        )
+
+        self.gnn_explainer = GNNExplainer(
             model=self.model,
             algorithm=GNNExplainer(epochs=epochs),  # Higher == better explanation
             explanation_type="model",               # Explains the model prediction
@@ -1315,14 +1330,29 @@ class ModelPipeline:
             ),
         )
 
-    def explain(self, edge_index: int) -> "Explanation":
-        """
-        Provide an `Explanation` for the given `edge_index`
+    def explain(self, target_edge: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Provides an explanation for the given `target_edge` using
+        the custom explainer (returns a node and edge mask over the set
+        of features for the target edge). These explanations are for use
+        with the `sample_and_plot_feature_importance` method
         """
         return self.explainer(
             x=self.x,
             edge_index=self.edge_index,
+            edge_attr=self.data.edge_attr[:, 1:],  # skips `edge_id`
+            target_edge=target_edge,
+        )
+
+    def gnn_explain(self, target_edge: int) -> "Explanation":
+        """Provides an explanation for the target edge using
+        `GNNExplainer` configured to mask nodes and edges. Can be used
+        to get an explanation subgraph. These explanations are for use
+        with the `plot_explanation_subgraph` plotting method
+        """
+        return self.gnn_explainer(
+            x=self.x,
+            edge_index=self.edge_index,
             edge_attr=self.data.edge_attr[:, 1:],  # skips edge_id
             target=self.y,
-            index=edge_index,
+            index=target_edge,
         )
