@@ -32,10 +32,6 @@ from pipeline.checks import Checker
 class GNNPipeline(ModelPipeline):
     def __init__(self, data_file):
         super().__init__(data_file)
-        self.num_nodes_overall = None
-        self.num_nodes_train = None
-        self.num_nodes_val = None
-        self.num_nodes_test = None
     
     def should_keep_acct_idx(self):
         return False
