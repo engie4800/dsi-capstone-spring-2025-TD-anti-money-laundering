@@ -64,17 +64,6 @@ def add_timestamp_scaled(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def add_received_amount_usd(df: pd.DataFrame, usd_conversion: dict) -> pd.DataFrame:
-    """Adds the `received_amount_usd` feature, which is the received
-    amount converted to USD
-    """
-    df["received_amount_usd"] = df.apply(
-        lambda row: row["received_amount"] * usd_conversion.get(row["received_currency"], 1),
-        axis=1,
-    )
-    return df
-
-
 def add_seconds_since_midnight(df: pd.DataFrame) -> pd.DataFrame:
     """Adds the `seconds_since_midnight` feature, which is the number
     of seconds that have elapsed since midnight on the day the
@@ -167,10 +156,26 @@ def add_turnaround_time(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def add_unique_identifiers(df: pd.DataFrame) -> pd.DataFrame:
+def add_unique_identifiers(
+    df: pd.DataFrame, 
+    keep_intermediate_fields: bool,
+) -> pd.DataFrame:
     """Adds unique node and edge (account and transaction) identifiers;
     these need to be added together to ensure consistent ordering
     between from and to account identifiers
+
+    Args:
+        df (pd.DataFrame): Pandas data frame containing transaction
+            data and having been preprocessed to some extent
+        keep_intermediate_fields (bool): Option to keep the intermediate
+            fields like `from_account` and `from_account_id`; they're
+            removed to encourage their disuse in model training, but
+            may be used in other applications like creating a
+            transaction subgraph
+
+    Returns:
+        df (pd.DataFrame): The input Pandas data frame with unique
+            identifier fields added
     """
     # Ensure that transactions are sorted by timestamp
     df = df.sort_values(by="timestamp_int").reset_index(drop=True)
@@ -216,15 +221,16 @@ def add_unique_identifiers(df: pd.DataFrame) -> pd.DataFrame:
 
     # Drop the intermediate fields to ensure they aren't used by
     # accident in training or elsewhere
-    df.drop(
-        columns=[
-            "from_account_id",
-            "to_account_id",
-            "from_account",
-            "to_account",
-        ],
-        inplace=True,
-    )
+    if not keep_intermediate_fields:
+        df.drop(
+            columns=[
+                "from_account_id",
+                "to_account_id",
+                "from_account",
+                "to_account",
+            ],
+            inplace=True,
+        )
     df = df.sort_values(by='edge_id').reset_index(drop=True)
 
     return df
