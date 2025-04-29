@@ -19,7 +19,6 @@ from model.features import (
     add_day_of_week,
     add_hour_of_day,
     add_is_weekend,
-    add_received_amount_usd,
     add_seconds_since_midnight,
     add_sent_amount_usd,
     add_time_diff_from,
@@ -43,8 +42,11 @@ class ModelPipeline:
         """
         self.dataset_path = dataset_path
         self.df = pd.read_csv(self.dataset_path)
-        self.initial_features = list(self.df.columns)
         self.nodes = pd.DataFrame()
+
+        # Reconstruct dataset directory.
+        # Assumes unix-like file paths.
+        self.dataset_dir = "/".join(self.dataset_path.split("/")[0:-1])
 
         # Track if preprocessing steps have been completed
         self.preprocessed = {
@@ -69,7 +71,6 @@ class ModelPipeline:
         }
         
         # New tracking dictionaries and lists
-        self.initial_features = []
         self.edge_features = []
         self.node_features = []
         self.scaled_edge_features = []
@@ -108,7 +109,7 @@ class ModelPipeline:
         semantics, in terms of using to and from, or sent and received,
         and to use the Pythonic snake case
         """
-        column_mapping = {
+        self.column_mapping = {
             "Timestamp": "timestamp",
             "From Bank": "from_bank",
             "Account": "from_account",
@@ -121,11 +122,13 @@ class ModelPipeline:
             "Payment Format": "payment_type",
             "Is Laundering": "is_laundering",
         }
-        
+
+        self.ibm_column_header = list(self.column_mapping.keys())
+
         # Ensure required columns exist
         missing_columns = [
             col
-            for col in column_mapping.keys()
+            for col in self.column_mapping.keys()
             if col not in self.df.columns
         ]
         if missing_columns:
@@ -133,7 +136,7 @@ class ModelPipeline:
                 f"Missing expected columns in dataset: {missing_columns}"
             )
 
-        self.df.rename(columns=column_mapping, inplace=True)
+        self.df.rename(columns=self.column_mapping, inplace=True)
         self.preprocessed["renamed"] = True
 
     def drop_duplicates(self) -> None:
@@ -162,7 +165,6 @@ class ModelPipeline:
 
             currency_exchange: exchange rate from sent to received
             add_sent_amount_usd: Sent amount in USD
-            add_received_amount_usd: Received amount in USD
 
         """
         logging.info("Extracting currency features...")
@@ -171,12 +173,14 @@ class ModelPipeline:
         self.df = add_currency_exchange(self.df)
         usd_conversion = get_usd_conversion(self.dataset_path)
         self.df = add_sent_amount_usd(self.df, usd_conversion)
+
         # TODO: do we need received amount USD? Should be same as sent_amount_USD...
         # self.df = add_received_amount_usd(self.df, usd_conversion)
         self.engineered_features += ['sent_amount_usd','log_currency_exchange']
+
         self.preprocessed["currency_features_extracted"] = True
 
-    def extract_time_features(self) -> None:
+    def extract_time_features(self, keep_timestamp: bool=False) -> None:
         """
         Extract initial time-related features
 
@@ -206,11 +210,12 @@ class ModelPipeline:
         # Dropping timestamp ensures that the complex timestamp string
         # itself isn't used as a feature, as it is poorly suited to be
         # one due to its monotonicity and high cardinality
-        self.df.drop(columns=["timestamp"], inplace= True)
+        if not keep_timestamp:
+            self.df.drop(columns=["timestamp"], inplace= True)
         
         self.preprocessed["time_features_extracted"] = True
 
-    def create_unique_ids(self) -> None:
+    def create_unique_ids(self, keep_intermediate_fields: bool=False) -> None:
         """Create a mapping from bank, account pairs, each of which
         should be unique, to a unique identifier. This adds the
         following data to each transaction:
@@ -230,7 +235,7 @@ class ModelPipeline:
         logging.info("Creating unique ids...")
         Checker.columns_were_renamed(self)
         Checker.time_features_were_extracted(self)
-        self.df = add_unique_identifiers(self.df)
+        self.df = add_unique_identifiers(self.df, keep_intermediate_fields)
         self.preprocessed["unique_ids_created"] = True
 
     def extract_additional_time_features(self) -> None:
