@@ -201,8 +201,6 @@ class GNNPipeline(ModelPipeline):
         self.threshold = threshold
         self.epochs = epochs
         self.patience = patience
-        
-        
 
         # Since `initialize_training` is run after preprocessing is
         # done, we can define the node and edge features here. This
@@ -215,14 +213,11 @@ class GNNPipeline(ModelPipeline):
             self.node_feature_labels = self.nodes.columns
         self.edge_feature_labels = self.df[self.edge_features].drop(columns="edge_id").columns
 
-
-
         # Model setup
         num_edge_features = self.train_data.edge_attr.shape[1]-1  # num edge feats - edge_id
         num_node_features = self.train_data.x.shape[1]
         self.model = GINe(n_node_feats=num_node_features, n_edge_feats=num_edge_features).to(self.device)
         self.trainer = GNNTrainer(self.model, self)
-
 
     def initialize_explainer(self, epochs: int=200) -> None:
         """

@@ -1,6 +1,6 @@
 from pipeline import ModelPipeline
 
-class CatBoostPipeline(ModelPipeline):
+class CatBoostPipeline(BaseModelPipeline):
     def __init__(self, data_file):
         super().__init__(data_file)
         
