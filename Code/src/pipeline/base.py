@@ -703,7 +703,7 @@ class BaseModelPipeline:
         self.val_size = len(self.X_val)
         self.test_size = len(self.X_test)
         self.preprocessed["train_test_val_data_split"] = True
-
+    
     def compute_split_specific_node_features(
         self,
         graph_features: list[str] = ["sent_amount_usd"],
@@ -824,7 +824,11 @@ class BaseModelPipeline:
             split_name="test",
             graph_features=graph_features
         )
-        self.num_nodes = {"train":len(self.train_nodes),"val":len(self.val_nodes),"test":len(self.test_nodes)}
+        self.num_nodes = {
+            "train": len(self.train_nodes),
+            "val": len(self.val_nodes),
+            "test": len(self.test_nodes)
+        }
 
         self.preprocessed["post_split_node_features"] = True
 
@@ -874,6 +878,26 @@ class BaseModelPipeline:
         
         self.scaled_node_features += cols_to_scale
         self.preprocessed["node_datasets_scaled"] = True
+        
+    def compute_placeholder_node_features(self) -> None:
+        """
+        Create placeholder node features when no graph-based node features desired.
+        """
+        logging.info("Creating placeholder node features...")
+        max_node = self.df[["from_account_idx", "to_account_idx"]].max().max()
+        placeholder_df = pd.DataFrame({
+            "node_id": np.arange(max_node + 1),
+            "placeholder": 1
+        })
+        self.train_nodes = placeholder_df.copy()
+        self.val_nodes = placeholder_df.copy()
+        self.test_nodes = placeholder_df.copy()
+        self.num_nodes = {
+            "train": len(self.train_nodes),
+            "val": len(self.val_nodes),
+            "test": len(self.test_nodes)
+        }
+        self.preprocessed["post_split_node_features"] = True
   
     def pipeline_summary(self):
         print("📋 Pipeline Summary:")
