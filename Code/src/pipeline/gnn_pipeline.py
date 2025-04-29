@@ -1,5 +1,3 @@
-from pipeline import ModelPipeline
-import torch
 import logging
 from typing import TYPE_CHECKING
 from types import SimpleNamespace
@@ -21,13 +19,16 @@ from torchmetrics.classification import (
     BinaryF1Score,
     BinaryAveragePrecision,
 )
+from tqdm import tqdm
+
 from explain import GNNEdgeExplainer
 from model import GINe, GNNTrainer
-from tqdm import tqdm
+from pipeline import ModelPipeline
+from pipeline.checks import Checker
 
 if TYPE_CHECKING:
     from torch_geometric.explain import Explanation
-from pipeline.checks import Checker
+
 
 class GNNPipeline(ModelPipeline):
     def __init__(self, data_file):
