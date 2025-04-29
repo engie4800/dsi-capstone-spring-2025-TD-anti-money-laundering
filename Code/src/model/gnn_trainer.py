@@ -145,7 +145,7 @@ class GNNTrainer:
         best_val_f1 = 0
         best_pr_auc = 0
         patience_counter = 0  # for early stopping
-        min_epochs = 10       # don't allow early model saving
+        min_epochs = 15       # don't allow early model saving
 
         for epoch in range(self.epochs):
             self.model.train()
@@ -225,17 +225,16 @@ class GNNTrainer:
             logging.info(f"Train Rec: {train_rec:.4f} | Val Rec: {val_rec:.4f} | Test Rec: {test_rec:.4f}")
             logging.info("-" * 80)
 
-            # Modify learning rate based on chosen metric (val_f1)
-            self.scheduler.step(val_f1)
+            # Modify learning rate based on chosen metric
+            self.scheduler.step(val_pr_auc)
 
             # Save best model
-            if epoch >= min_epochs and ((val_f1 > best_val_f1) or (val_pr_auc > best_pr_auc)):
-                best_val_f1 = max(val_f1, best_val_f1)
+            if epoch >= min_epochs and (val_pr_auc > best_pr_auc):
                 best_pr_auc = max(val_pr_auc, best_pr_auc)
                 patience_counter = 0
                 torch.save(self.model.state_dict(), f"best_model_epoch{epoch+1}.pt")
                 print("✅ New best model saved.")
-            elif epoch >= min_epochs:
+            elif epoch >= min_epochs and self.patience is not None:
                 patience_counter += 1
                 print(f"⚠️ No improvement. Patience: {patience_counter}/{self.patience}")
                 if patience_counter >= self.patience:
