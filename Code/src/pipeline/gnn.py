@@ -1,24 +1,12 @@
 import logging
 from typing import TYPE_CHECKING
-from types import SimpleNamespace
 
-import networkx as nx
 import numpy as np
 import torch
-import torch.nn as nn
-from IPython.display import display
 from sklearn.preprocessing import StandardScaler
-from torch_geometric.explain import Explainer, GNNExplainer
+from torch_geometric.explain import GNNExplainer
 from torch_geometric.data import Data
 from torch_geometric.loader import LinkNeighborLoader
-from torch.optim import Adam
-from torchmetrics.classification import (
-    BinaryAccuracy,
-    BinaryPrecision,
-    BinaryRecall,
-    BinaryF1Score,
-    BinaryAveragePrecision,
-)
 from tqdm import tqdm
 
 from explain import GNNEdgeExplainer
@@ -30,7 +18,7 @@ if TYPE_CHECKING:
     from torch_geometric.explain import Explanation
 
 
-class GNNPipeline(BaseModelPipeline):
+class GNNModelPipeline(BaseModelPipeline):
     def __init__(self, data_file):
         super().__init__(data_file)
     

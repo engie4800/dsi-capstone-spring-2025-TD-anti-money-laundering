@@ -3,11 +3,11 @@ import random
 import matplotlib.pyplot as plt
 import numpy as np
 
-from pipeline import ModelPipeline
+from pipeline import GNNModelPipeline
 
 
 def sample_and_plot_feature_importance(
-    p: ModelPipeline,
+    p: GNNModelPipeline,
     n_samples: int=1000,
     illicit_transactions_only: bool=False,
 ) -> None:

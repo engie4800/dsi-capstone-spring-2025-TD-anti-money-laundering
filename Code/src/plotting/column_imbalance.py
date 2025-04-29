@@ -7,11 +7,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from pipeline import ModelPipeline
+from pipeline import BaseModelPipeline
 from .colors import SOFT_COLORS
 
 
-def pre_preprocessed_plot_check(p: ModelPipeline) -> None:
+def pre_preprocessed_plot_check(p: BaseModelPipeline) -> None:
     """
     This check should be run at the beginning of plotting methods that
     assume the data isn't fully preprocessed, e.g. that the plots
@@ -28,7 +28,7 @@ def pre_preprocessed_plot_check(p: ModelPipeline) -> None:
 
 
 def plot_column_imbalance(
-    p: ModelPipeline,
+    p: BaseModelPipeline,
     column: str,
     label: str,
     bins: list[Union[int, float]]=[0, 10, 100, 1000, 10000, np.inf],
@@ -117,7 +117,7 @@ def plot_column_imbalance(
         plt.show()
 
 
-def plot_column_imbalances(p: ModelPipeline) -> None:
+def plot_column_imbalances(p: BaseModelPipeline) -> None:
     """
     Wrapper plot to create a 2x2 plot of base data imbalance
     """

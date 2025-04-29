@@ -11,6 +11,7 @@ let them only worry about adding features).
 import numpy as np
 import pandas as pd
 
+
 def add_currency_exchange(df: pd.DataFrame) -> pd.DataFrame:
     """Add `log_exchange_rate` feature, which is log(sent/received) 
     and is an indicator of way of currency conversion (to lower or higher-val currency).
