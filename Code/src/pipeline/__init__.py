@@ -42,6 +42,7 @@ class BaseModelPipeline:
         self.dataset_path = dataset_path
         self.df = pd.read_csv(self.dataset_path)
         self.nodes = pd.DataFrame()
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         # Reconstruct dataset directory.
         # Assumes unix-like file paths.
@@ -249,9 +250,6 @@ class BaseModelPipeline:
         Checker.time_features_were_extracted(self)
         Checker.unique_ids_were_created(self)
 
-        # TODO: does it make sense to add an analogous `time_diff_to`
-        # representing the time since the receiver in a transaction
-        # previously received money? Sure
         self.df = add_time_diff_from(self.df)
         self.df = add_time_diff_to(self.df)
         self.df = add_turnaround_time(self.df)
