@@ -102,8 +102,6 @@ class GNNPipeline(ModelPipeline):
         Uses training set to fit scalers, then applies to all sets.
         """
         logging.info("Scaling edge features: %s", edge_features_to_scale)
-        
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         if edge_features_to_scale is None:
             self.scaled_edge_features = [
@@ -156,10 +154,6 @@ class GNNPipeline(ModelPipeline):
     def get_data_loaders(self, num_neighbors=[100,100], batch_size=8192):
         logging.info("Getting data loaders")
         Checker.graph_data_split_to_train_val_test(self)
-
-        # TODO: might be able to move this to somewhere more meaningful,
-        # but it is needed here at the latest
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         self.train_loader = LinkNeighborLoader(
             data=self.train_data,
