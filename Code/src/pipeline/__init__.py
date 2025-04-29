@@ -24,7 +24,6 @@ from model.features import (
     add_time_diff_from,
     add_time_diff_to,
     add_timestamp_int,
-    add_timestamp_scaled,
     add_turnaround_time,
     add_unique_identifiers,
     cyclically_encode_feature
@@ -174,8 +173,6 @@ class ModelPipeline:
         usd_conversion = get_usd_conversion(self.dataset_path)
         self.df = add_sent_amount_usd(self.df, usd_conversion)
 
-        # TODO: do we need received amount USD? Should be same as sent_amount_USD...
-        # self.df = add_received_amount_usd(self.df, usd_conversion)
         self.engineered_features += ['sent_amount_usd','log_currency_exchange']
 
         self.preprocessed["currency_features_extracted"] = True
@@ -205,7 +202,6 @@ class ModelPipeline:
         self.df = add_seconds_since_midnight(self.df)
         self.df = add_is_weekend(self.df)
         self.df = add_timestamp_int(self.df)
-        # self.df = add_timestamp_scaled(self.df) just scale _int version
 
         # Dropping timestamp ensures that the complex timestamp string
         # itself isn't used as a feature, as it is poorly suited to be
