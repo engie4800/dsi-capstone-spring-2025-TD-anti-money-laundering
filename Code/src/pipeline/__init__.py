@@ -634,7 +634,17 @@ class ModelPipeline:
         cols = X_cols or self.df.columns
          
         # Remove identifying fields, as well as the output `is_laundering`
-        exclude_cols = {"from_bank", "to_bank", "from_account","to_account","from_account_idx", "to_account_idx","from_account_id","to_account_id","is_laundering"}
+        exclude_cols = {
+            "from_bank",
+            "to_bank",
+            "from_account",
+            "to_account",
+            "from_account_idx",
+            "to_account_idx",
+            "from_account_id",
+            "to_account_id",
+            "is_laundering",
+        }
         self.X_cols = list(set(cols) - exclude_cols)
 
         if self.should_keep_acct_idx():
@@ -799,7 +809,6 @@ class ModelPipeline:
             node_df = pd.merge(node_graph_df, node_stat_features, on="node_id", how="outer")
             node_df.fillna(0, inplace=True)
             node_df = node_df.sort_values("node_id").reset_index(drop=True)
-            
             print(f"✅ Computed node features for {split_name} with {len(node_df)} nodes.")
             return node_df
 
