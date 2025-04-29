@@ -33,7 +33,7 @@ from pipeline.checks import Checker
 if TYPE_CHECKING:
     from torch_geometric.explain import Explanation
 
-class ModelPipeline:
+class BaseModelPipeline:
 
     def __init__(self, dataset_path: str):
         """
