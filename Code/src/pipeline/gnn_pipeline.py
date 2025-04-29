@@ -23,14 +23,14 @@ from tqdm import tqdm
 
 from explain import GNNEdgeExplainer
 from model import GINe, GNNTrainer
-from pipeline import ModelPipeline
+from pipeline import BaseModelPipeline
 from pipeline.checks import Checker
 
 if TYPE_CHECKING:
     from torch_geometric.explain import Explanation
 
 
-class GNNPipeline(ModelPipeline):
+class GNNPipeline(BaseModelPipeline):
     def __init__(self, data_file):
         super().__init__(data_file)
     
