@@ -1,4 +1,4 @@
-from pipeline import ModelPipeline
+from pipeline import BaseModelPipeline
 
 class CatBoostPipeline(BaseModelPipeline):
     def __init__(self, data_file):
