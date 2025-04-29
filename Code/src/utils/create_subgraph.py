@@ -8,7 +8,7 @@ import torch
 from torch_geometric.utils import k_hop_subgraph
 from torch import Tensor
 
-from pipeline import ModelPipeline
+from pipeline import GNNModelPipeline
 from pipeline.checks import Checker
 
 
@@ -21,7 +21,7 @@ def estimate_df_to_csv_size(df: pd.DataFrame) -> int:
 
 
 def validate_subgraph_inputs(
-    p: ModelPipeline,
+    p: GNNModelPipeline,
     target_portion: float,
 ) -> None:
     # Target portion needs to be a float between zero and one
@@ -42,7 +42,7 @@ def validate_subgraph_inputs(
     Checker.unique_ids_were_created(p)
 
 
-def build_tensors(p: ModelPipeline) -> tuple[Tensor, Tensor, Tensor]:
+def build_tensors(p: GNNModelPipeline) -> tuple[Tensor, Tensor, Tensor]:
     """
     Step one: build edge index and label tensors
     """
@@ -71,7 +71,7 @@ def identify_illicit_edges_nodes(
 
 
 def extract_illicit_neighborhood(
-    p: ModelPipeline,
+    p: GNNModelPipeline,
     target_portion: float,
     input_file: str,
     illicit_nodes: Tensor,
@@ -145,7 +145,7 @@ def extract_illicit_neighborhood(
 
 
 def expand_graph_licitly(
-    p: ModelPipeline,
+    p: GNNModelPipeline,
     target_portion: float,
     illicit_subgraph_df: pd.DataFrame,
     illicit_df_indices: Tensor,
@@ -200,7 +200,7 @@ def sample_licit_neighborhood(
 
 
 def combine_illicit_licit_subgraphs(
-    p: ModelPipeline,
+    p: GNNModelPipeline,
     illicit_df_indices: Tensor,
     sampled_combined_edge_indices: Tensor,
 ) -> pd.DataFrame:
@@ -223,7 +223,7 @@ def combine_illicit_licit_subgraphs(
     return final_subset_df
 
 
-def reformat_final_df(p: ModelPipeline, final_subset_df: pd.DataFrame) -> pd.DataFrame:
+def reformat_final_df(p: GNNModelPipeline, final_subset_df: pd.DataFrame) -> pd.DataFrame:
     """
     Step seven: return data to the original IBM format for saving
     """
@@ -239,7 +239,7 @@ def reformat_final_df(p: ModelPipeline, final_subset_df: pd.DataFrame) -> pd.Dat
 
 
 def create_subgraph(
-    p: ModelPipeline,
+    p: GNNModelPipeline,
     save_subgraph: bool=False,
     file_name: str="subset_transactions.csv",
     target_portion: float=0.25
