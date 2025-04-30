@@ -54,7 +54,7 @@ class GNNTrainer:
             self.optimizer,
             mode="max",            # maximize the metric (e.g., F1, PR AUC)
             factor=0.5,            # reduce LR by half when triggered
-            patience=3,            # wait 3 epochs without improvement
+            patience=5,            # wait 3 epochs without improvement
             verbose=True
         )
         
@@ -144,6 +144,7 @@ class GNNTrainer:
 
         best_val_f1 = 0
         best_pr_auc = 0
+        val_metric = 0 
         patience_counter = 0  # for early stopping
         min_epochs = 15       # don't allow early model saving
 
@@ -226,11 +227,12 @@ class GNNTrainer:
             logging.info("-" * 80)
 
             # Modify learning rate based on chosen metric
-            self.scheduler.step(val_pr_auc)
+            val_metric = 0.6 * val_f1 + 0.4 * val_pr_auc
+            self.scheduler.step(val_metric)
 
             # Save best model
-            if epoch >= min_epochs and (val_pr_auc > best_pr_auc):
-                best_pr_auc = max(val_pr_auc, best_pr_auc)
+            if epoch >= min_epochs and (val_metric > best_val_metric):
+                best_val_metric = val_metric
                 patience_counter = 0
                 torch.save(self.model.state_dict(), f"best_model_epoch{epoch+1}.pt")
                 print("✅ New best model saved.")
