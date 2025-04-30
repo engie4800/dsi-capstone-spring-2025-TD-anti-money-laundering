@@ -10,7 +10,7 @@ from torch_geometric.loader import LinkNeighborLoader
 from tqdm import tqdm
 
 from explain import GNNEdgeExplainer
-from model import GINe, GNNTrainer
+from model import GNN, GNNTrainer
 from pipeline import BaseModelPipeline
 from pipeline.checks import Checker
 
@@ -19,8 +19,9 @@ if TYPE_CHECKING:
 
 
 class GNNModelPipeline(BaseModelPipeline):
-    def __init__(self, data_file):
-        super().__init__(data_file)
+
+    def __init__(self, dataset_path):
+        super().__init__(dataset_path)
     
     def should_keep_acct_idx(self):
         return False
@@ -182,6 +183,7 @@ class GNNModelPipeline(BaseModelPipeline):
         threshold: float=0.5,
         epochs: int=50,
         patience: int=10,
+        gnn_flavor: str="GINe",
     ) -> None:
         """Setup the model pipeline for training: metrics, model,
         optimizer, scheduler, and criterion
@@ -204,7 +206,11 @@ class GNNModelPipeline(BaseModelPipeline):
         # Model setup
         num_edge_features = self.train_data.edge_attr.shape[1]-1  # num edge feats - edge_id
         num_node_features = self.train_data.x.shape[1]
-        self.model = GINe(n_node_feats=num_node_features, n_edge_feats=num_edge_features).to(self.device)
+        self.model = GNN(
+            n_node_feats=num_node_features,
+            n_edge_feats=num_edge_features,
+            gnn_flavor=gnn_flavor,
+        ).to(self.device)
         self.trainer = GNNTrainer(self.model, self)
 
     def initialize_explainer(self, epochs: int=200) -> None:

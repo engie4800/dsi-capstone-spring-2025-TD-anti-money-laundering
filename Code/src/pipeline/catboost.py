@@ -2,8 +2,8 @@ from pipeline import BaseModelPipeline
 
 
 class CatBoostPipeline(BaseModelPipeline):
-    def __init__(self, data_file):
-        super().__init__(data_file)
+    def __init__(self, dataset_path):
+        super().__init__(dataset_path)
         
         self.keep_acct_idx = True
     
