@@ -54,7 +54,7 @@ class GNNTrainer:
             self.optimizer,
             mode="max",            # maximize the metric (e.g., F1, PR AUC)
             factor=0.5,            # reduce LR by half when triggered
-            patience=5,            # wait 3 epochs without improvement
+            patience=10,            # wait 10 epochs without improvement
             verbose=True
         )
         
@@ -144,7 +144,7 @@ class GNNTrainer:
 
         best_val_f1 = 0
         best_pr_auc = 0
-        val_metric = 0 
+        best_val_metric = 0 
         patience_counter = 0  # for early stopping
         min_epochs = 15       # don't allow early model saving
 
