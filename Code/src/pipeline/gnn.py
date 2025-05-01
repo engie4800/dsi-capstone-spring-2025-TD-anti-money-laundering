@@ -165,7 +165,7 @@ class GNNModelPipeline(BaseModelPipeline):
         logging.info("Getting data loaders")
         Checker.graph_data_split_to_train_val_test(self)
         
-        if self.train_data.is_instance(HeteroData):
+        if isinstance(self.train_data, HeteroData):
             tr_edge_label_index = self.train_data['node', 'to', 'node'].edge_index
             tr_edge_label = self.train_data['node', 'to', 'node'].y
 
