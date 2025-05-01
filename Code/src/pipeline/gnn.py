@@ -95,6 +95,7 @@ class GNNModelPipeline(BaseModelPipeline):
             self.train_data = add_ports(self.train_data)
             self.val_data = add_ports(self.val_data)
             self.test_data = add_ports(self.test_data)
+            self.edge_features += ['port_in', 'port_out']
         
         if reverse_mp:
             self.train_data = create_hetero_data(self.train_data.x,  self.train_data.y,  self.train_data.edge_index,  self.train_data.edge_attr, self.train_data.timestamps, ports)
