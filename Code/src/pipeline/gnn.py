@@ -29,7 +29,7 @@ class GNNModelPipeline(BaseModelPipeline):
     def split_train_test_val(self, X_cols=None, y_col="is_laundering", test_size=0.15, val_size=0.15, split_type="temporal_agg"):
             return super().split_train_test_val(X_cols, y_col, test_size, val_size, split_type)
            
-    def split_train_test_val_graph(self, edge_features:list[str]=None, reverse_mp:bool=False, ports:bool=False) -> None:
+    def split_train_test_val_graph(self, edge_features:list[str]=None, edge_features_to_scale:list[str]=None, reverse_mp:bool=False, ports:bool=False) -> None:
         """Creates graph objects for use in GNN.
         """
         logging.info("Splitting into train, test, validation graphs")
@@ -90,6 +90,8 @@ class GNNModelPipeline(BaseModelPipeline):
             y=self.y,
             timestamps=te_times
         )
+        
+        self.scale_edge_features(edge_features_to_scale)
 
         if ports:
             self.train_data = add_ports(self.train_data)
@@ -122,7 +124,7 @@ class GNNModelPipeline(BaseModelPipeline):
         else:
             self.scaled_edge_features = edge_features_to_scale
         
-        scalers = {}
+        scalers = {}       
         train_edge_attr = self.train_data.edge_attr.cpu().numpy()
         val_edge_attr = self.val_data.edge_attr.cpu().numpy()
         test_edge_attr = self.test_data.edge_attr.cpu().numpy()
