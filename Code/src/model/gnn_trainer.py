@@ -132,6 +132,74 @@ class GNNTrainer:
             self.metrics.f1_score(preds, targets),
             self.metrics.pr_auc(probs, targets)
         )
+        
+    @torch.no_grad()
+    def evaluate_hetero(self, loader, inds):
+        """Evaluate model performance on a given data loader and indices.
+
+        Args:
+            loader: PyG LinkNeighborLoader.
+            inds (torch.Tensor): Global indices to retrieve edge_ids for masking.
+            threshold (float): Threshold to binarize predicted probabilities.
+
+        Returns:
+            Tuple of (loss, accuracy, precision, recall, F1, PR-AUC)
+        """
+        self.model.eval() # evaluation mode
+        
+        # Initialize metrics
+        self.metrics.accuracy.reset()
+        self.metrics.precision.reset()
+        self.metrics.recall.reset()
+        self.metrics.f1_score.reset()
+        self.metrics.pr_auc.reset()
+
+        loss_fn = nn.BCEWithLogitsLoss()
+        preds, targets, probs = [], [], []
+        total_loss = 0
+
+        # Run evaluation
+        for batch in loader:
+            # Get seed transaction ids that we are evaluating this batch
+            batch_input_ids = batch['node', 'to', 'node'].input_id.detach().cpu()
+            global_seed_inds = inds[batch_input_ids]
+            seed_edge_ids = self.df.loc[global_seed_inds.cpu().numpy(), "edge_id"].values
+            edge_ids_in_batch = batch['node', 'to', 'node'].edge_attr[:, 0].detach().cpu().numpy()
+            mask = torch.isin(torch.tensor(edge_ids_in_batch), torch.tensor(seed_edge_ids)).to(self.device)
+
+            # Remove edge_id as attribute before running model
+            batch = batch.to(self.device)
+            batch['node', 'to', 'node'] = batch['node', 'to', 'node'].edge_attr[:, 1:].clone()
+            batch['node', 'rev_to', 'node'].edge_attr = batch['node', 'rev_to', 'node'].edge_attr[:, 1:].clone()
+            
+            # Forward pass
+            logits = self.model(batch.x_dict, batch.edge_index_dict, batch.edge_attr_dict)
+            logits = logits(['node', 'to', 'node']).view(-1)[mask]
+            target = batch['node', 'to', 'node'].y[mask]
+            prob = torch.sigmoid(logits)
+            pred = (probs > self.threshold).long()
+
+            total_loss += loss_fn(logits, target.float()).item() * logits.size(0)
+            
+            # Batch stats
+            preds.append(pred)
+            targets.append(target)
+            probs.append(prob)
+
+        # Epoch stats
+        preds = torch.cat(preds)
+        targets = torch.cat(targets)
+        probs = torch.cat(probs)
+        total_loss /= len(targets)
+
+        return (
+            total_loss,
+            self.metrics.accuracy(preds, targets),
+            self.metrics.precision(preds, targets),
+            self.metrics.recall(preds, targets),
+            self.metrics.f1_score(preds, targets),
+            self.metrics.pr_auc(probs, targets)
+        )
 
     def train(self):
         """Main training loop for the model.
@@ -227,7 +295,7 @@ class GNNTrainer:
             logging.info("-" * 80)
 
             # Modify learning rate based on chosen metric
-            val_metric = 0.6 * val_f1 + 0.4 * val_pr_auc
+            val_metric = 0.5 * val_f1 + 0.5 * val_pr_auc
             self.scheduler.step(val_metric)
 
             # Save best model
@@ -244,3 +312,110 @@ class GNNTrainer:
                     break
 
             torch.cuda.empty_cache()
+    
+    
+    def train_hetero(self):
+        best_val_metric = 0 
+        patience_counter = 0  # for early stopping
+        min_epochs = 15       # don't allow early model saving
+
+        for epoch in range(self.epochs):
+            self.model.train()
+            train_loss = 0
+            train_preds, train_targets, train_probs = [], [], []
+            
+            # Reset metrics
+            self.metrics.accuracy.reset()
+            self.metrics.precision.reset()
+            self.metrics.recall.reset()
+            self.metrics.f1_score.reset()
+            self.metrics.pr_auc.reset()
+
+            for batch in tqdm(self.train_loader, desc=f"Epoch {epoch+1} Training"):
+                self.optimizer.zero_grad()
+                
+                # Identify  batch seed transaction ids for loss calculation
+                batch_input_ids = batch['node', 'to', 'node'].input_id.detach().cpu()
+                global_seed_inds = self.train_indices[batch_input_ids]
+                seed_edge_ids = self.df.loc[global_seed_inds.cpu().numpy(), "edge_id"].values
+                edge_ids_in_batch = batch['node', 'to', 'node'].edge_attr[:, 0].detach().cpu().numpy()
+                mask = torch.isin(torch.tensor(edge_ids_in_batch), torch.tensor(seed_edge_ids)).to(self.device)
+
+                # Remove edge_id as attribute before running model
+                batch = batch.to(self.device)
+                batch['node', 'to', 'node'] = batch['node', 'to', 'node'].edge_attr[:, 1:].clone()
+                batch['node', 'rev_to', 'node'].edge_attr = batch['node', 'rev_to', 'node'].edge_attr[:, 1:].clone()
+                
+                # Forward pass
+                logits = self.model(batch.x_dict, batch.edge_index_dict, batch.edge_attr_dict)
+                logits = logits(['node', 'to', 'node']).view(-1)[mask]
+                target = batch['node', 'to', 'node'].y[mask]
+                probs = torch.sigmoid(logits)
+                preds = (probs > self.threshold).long()
+                
+                # Loss and backpropagation
+                loss = self.criterion(logits, target.float())
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
+                self.optimizer.step()
+
+                # Batch stats
+                train_loss += loss.item() * logits.size(0)
+                train_preds.append(preds)
+                train_targets.append(target)
+                train_probs.append(probs)
+
+            # Epoch stats
+            train_preds = torch.cat(train_preds)
+            train_targets = torch.cat(train_targets)
+            train_probs = torch.cat(train_probs)
+            train_loss /= len(train_targets)
+
+            train_acc = self.metrics.accuracy(train_preds, train_targets)
+            train_prec = self.metrics.precision(train_preds, train_targets)
+            train_rec = self.metrics.recall(train_preds, train_targets)
+            train_f1 = self.metrics.f1_score(train_preds, train_targets)
+            train_pr_auc = self.metrics.pr_auc(train_probs, train_targets)
+
+            # Validation
+            val_loss, val_acc, val_prec, val_rec, val_f1, val_pr_auc = self.evaluate_hetero(
+                self.val_loader,
+                self.val_indices
+            )
+
+            # Test
+            test_loss, test_acc, test_prec, test_rec, test_f1, test_pr_auc = self.evaluate_hetero(
+                self.test_loader,
+                self.test_indices,
+            )
+            
+            # Logging
+            logging.info(f"Epoch {epoch+1}/{self.epochs}")
+            logging.info(f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Test Loss: {test_loss:.4f}")
+            logging.info(f"Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f} | Test Acc: {test_acc:.4f}")
+            logging.info(f"Train F1: {train_f1:.4f} | Val F1: {val_f1:.4f} | Test F1: {test_f1:.4f}")
+            logging.info(f"Train PR-AUC: {train_pr_auc:.4f} | Val PR-AUC: {val_pr_auc:.4f} | Test PR-AUC: {test_pr_auc:.4f}")
+            logging.info(f"Train Prec: {train_prec:.4f} | Val Prec: {val_prec:.4f} | Test Prec: {test_prec:.4f}")
+            logging.info(f"Train Rec: {train_rec:.4f} | Val Rec: {val_rec:.4f} | Test Rec: {test_rec:.4f}")
+            logging.info("-" * 80)
+
+            # Modify learning rate based on chosen metric
+            val_metric = 0.5 * val_f1 + 0.5 * val_pr_auc
+            self.scheduler.step(val_metric)
+
+            # Save best model
+            if epoch >= min_epochs and (val_metric > best_val_metric):
+                best_val_metric = val_metric
+                patience_counter = 0
+                torch.save(self.model.state_dict(), f"best_model_epoch{epoch+1}.pt")
+                print("✅ New best model saved.")
+            elif epoch >= min_epochs and self.patience is not None:
+                patience_counter += 1
+                print(f"⚠️ No improvement. Patience: {patience_counter}/{self.patience}")
+                if patience_counter >= self.patience:
+                    print("🛑 Early stopping triggered.")
+                    break
+
+            torch.cuda.empty_cache()
+            
+
