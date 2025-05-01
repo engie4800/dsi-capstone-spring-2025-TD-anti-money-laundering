@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch.nn import Parameter
 from torch_geometric.utils import k_hop_subgraph
 
-from model import GINe
+from model import GNN
 
 
 class GNNEdgeExplainer(torch.nn.Module):
@@ -31,7 +31,7 @@ class GNNEdgeExplainer(torch.nn.Module):
 
     def __init__(
         self,
-        model: GINe,
+        model: GNN,
         n_node_feats: int,
         n_edge_feats: int,
         epochs: int=100,

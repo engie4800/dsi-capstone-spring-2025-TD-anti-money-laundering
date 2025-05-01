@@ -1,6 +1,6 @@
-from .base_pipeline import BaseModelPipeline
-from .catboost_pipeline import CatBoostPipeline
-from .gnn_pipeline import GNNModelPipeline
+from .base import BaseModelPipeline
+from .catboost import CatBoostPipeline
+from .gnn import GNNModelPipeline
 
 
 __all__ = [
