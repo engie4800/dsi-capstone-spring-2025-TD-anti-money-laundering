@@ -5,14 +5,15 @@ import numpy as np
 import torch
 from sklearn.preprocessing import StandardScaler
 from torch_geometric.explain import GNNExplainer
-from torch_geometric.data import Data
+from torch_geometric.data import Data, HeteroData
 from torch_geometric.loader import LinkNeighborLoader
-from tqdm import tqdm
 
 from explain import GNNEdgeExplainer
 from model import GINe, GNNTrainer
 from pipeline import BaseModelPipeline
 from pipeline.checks import Checker
+from pipeline.reverse_mp_utils import create_hetero_data
+from model.features import add_ports
 
 if TYPE_CHECKING:
     from torch_geometric.explain import Explanation
@@ -27,8 +28,8 @@ class GNNModelPipeline(BaseModelPipeline):
     
     def split_train_test_val(self, X_cols=None, y_col="is_laundering", test_size=0.15, val_size=0.15, split_type="temporal_agg"):
             return super().split_train_test_val(X_cols, y_col, test_size, val_size, split_type)
-         
-    def split_train_test_val_graph(self, edge_features=None):
+           
+    def split_train_test_val_graph(self, edge_features:list[str]=None, reverse_mp:bool=False, ports:bool=False) -> None:
         """Creates graph objects for use in GNN.
         """
         logging.info("Splitting into train, test, validation graphs")
@@ -56,6 +57,11 @@ class GNNModelPipeline(BaseModelPipeline):
 
         # Edge attr
         edge_attr = torch.tensor(self.df[self.edge_features].to_numpy(), dtype=torch.float)
+        
+        # Edge timestamps
+        tr_times = torch.tensor(self.X_train['edge_id'])
+        val_times = torch.tensor(self.X_val['edge_id'])
+        te_times = torch.tensor(self.X_test['edge_id'])
 
         # Overwrites the values we got from the original split
         self.train_indices = torch.tensor(self.train_indices)
@@ -68,22 +74,35 @@ class GNNModelPipeline(BaseModelPipeline):
             edge_index=self.edge_index[:,self.train_indices],
             edge_attr=edge_attr[self.train_indices],
             y=self.y[self.train_indices],
+            timestamps=tr_times
         )
         self.val_data = Data(
             x=val_x,
             edge_index=self.edge_index[:,cat_tr_val_inds],
             edge_attr=edge_attr[cat_tr_val_inds],
             y=self.y[cat_tr_val_inds],
+            timestamps=val_times
         )
         self.test_data = Data(
             x=te_x,
             edge_index=self.edge_index,
             edge_attr=edge_attr,
             y=self.y,
+            timestamps=te_times
         )
 
-        self.preprocessed["train_test_val_data_split_graph"] = True
+        if ports:
+            self.train_data = add_ports(self.train_data)
+            self.val_data = add_ports(self.val_data)
+            self.test_data = add_ports(self.test_data)
         
+        if reverse_mp:
+            self.train_data = create_hetero_data(self.train_data.x,  self.train_data.y,  self.train_data.edge_index,  self.train_data.edge_attr, self.train_data.timestamps, ports)
+            self.val_data = create_hetero_data(self.val_data.x,  self.val_data.y,  self.val_data.edge_index,  self.val_data.edge_attr, self.val_data.timestamps, ports)
+            self.test_data = create_hetero_data(self.test_data.x,  self.test_data.y,  self.test_data.edge_index,  self.test_data.edge_attr, self.test_data.timestamps, ports)
+        
+        self.preprocessed["train_test_val_data_split_graph"] = True
+     
     def scale_edge_features(self, edge_features_to_scale: list[str]):
         """
         Scale and impute edge features in train/val/test data in place.
@@ -142,33 +161,58 @@ class GNNModelPipeline(BaseModelPipeline):
     def get_data_loaders(self, num_neighbors=[100,100], batch_size=8192):
         logging.info("Getting data loaders")
         Checker.graph_data_split_to_train_val_test(self)
+        
+        if self.train_data.isinstance(HeteroData):
+            tr_edge_label_index = self.train_data['node', 'to', 'node'].edge_index
+            tr_edge_label = self.train_data['node', 'to', 'node'].y
 
-        self.train_loader = LinkNeighborLoader(
-            data=self.train_data,
-            edge_label_index=self.edge_index[:, self.train_indices],
-            edge_label=self.y[self.train_indices],
-            batch_size=batch_size,
-            num_neighbors=num_neighbors,
-            shuffle=True,
-        )
 
-        self.val_loader = LinkNeighborLoader(
-            data=self.val_data,
-            edge_label_index=self.edge_index[:, self.val_indices],
-            edge_label=self.y[self.val_indices],
-            batch_size=batch_size,
-            num_neighbors=num_neighbors,
-            shuffle=False,
-        )
+            self.train_loader =  LinkNeighborLoader(self.train_data, num_neighbors=num_neighbors, 
+                                        edge_label_index=(('node', 'to', 'node'), tr_edge_label_index), 
+                                        edge_label=tr_edge_label, batch_size=batch_size, shuffle=True)
+            
+            val_edge_label_index = self.val_data['node', 'to', 'node'].edge_index[:,self.val_indices]
+            val_edge_label = self.val_data['node', 'to', 'node'].y[self.val_indices]
 
-        self.test_loader = LinkNeighborLoader(
-            data=self.test_data,
-            edge_label_index=self.edge_index[:, self.test_indices],
-            edge_label=self.y[self.test_indices],
-            batch_size=batch_size,
-            num_neighbors=num_neighbors,
-            shuffle=False,
-        )
+
+            self.val_loader =  LinkNeighborLoader(self.val_data, num_neighbors=num_neighbors, 
+                                        edge_label_index=(('node', 'to', 'node'), val_edge_label_index), 
+                                        edge_label=val_edge_label, batch_size=batch_size, shuffle=False)
+            
+            te_edge_label_index = self.test_data['node', 'to', 'node'].edge_index[:,self.test_indices]
+            te_edge_label = self.test_data['node', 'to', 'node'].y[self.test_indices]
+
+
+            self.test_loader =  LinkNeighborLoader(self.test_data, num_neighbors=num_neighbors, 
+                                        edge_label_index=(('node', 'to', 'node'), te_edge_label_index), 
+                                        edge_label=te_edge_label, batch_size=batch_size, shuffle=False)
+        else:
+            self.train_loader = LinkNeighborLoader(
+                data=self.train_data,
+                edge_label_index=self.edge_index[:, self.train_indices],
+                edge_label=self.y[self.train_indices],
+                batch_size=batch_size,
+                num_neighbors=num_neighbors,
+                shuffle=True,
+            )
+
+            self.val_loader = LinkNeighborLoader(
+                data=self.val_data,
+                edge_label_index=self.edge_index[:, self.val_indices],
+                edge_label=self.y[self.val_indices],
+                batch_size=batch_size,
+                num_neighbors=num_neighbors,
+                shuffle=False,
+            )
+
+            self.test_loader = LinkNeighborLoader(
+                data=self.test_data,
+                edge_label_index=self.edge_index[:, self.test_indices],
+                edge_label=self.y[self.test_indices],
+                batch_size=batch_size,
+                num_neighbors=num_neighbors,
+                shuffle=False,
+            )
 
         self.preprocessed["got_data_loaders"] = True
                 

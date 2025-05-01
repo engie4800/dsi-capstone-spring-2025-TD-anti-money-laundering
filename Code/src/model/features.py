@@ -11,6 +11,8 @@ let them only worry about adding features).
 import numpy as np
 import pandas as pd
 
+import torch
+
 
 def add_currency_exchange(df: pd.DataFrame) -> pd.DataFrame:
     """Add `log_exchange_rate` feature, which is log(sent/received) 
@@ -254,3 +256,42 @@ def cyclically_encode_feature(
     df[f"{feature}_cos"] = np.cos(2 * np.pi * df[source_feature] / scale)
     df[f"{feature}_sin"] = np.sin(2 * np.pi * df[source_feature] / scale)
     return df
+
+
+def to_adj_nodes_with_times(data):
+    num_nodes = data.num_nodes
+    timestamps = data.timestamps.reshape((-1, 1)) # if hasattr(data, "timestamps") and data.timestamps is not None else torch.zeros((data.edge_index.shape[1], 1))
+    edges = torch.cat((data.edge_index.T, timestamps), dim=1)
+    adj_list_out = {i: [] for i in range(num_nodes)}
+    adj_list_in = {i: [] for i in range(num_nodes)}
+    for u, v, t in edges:
+        u, v, t = int(u), int(v), int(t)
+        adj_list_out[u].append((v, t))
+        adj_list_in[v].append((u, t))
+    return adj_list_in, adj_list_out
+
+def ports(edge_index, adj_list):
+    ports = torch.zeros(edge_index.shape[1], 1)
+    ports_dict = {}
+    for v, nbs in adj_list.items():
+        if not nbs:
+            continue
+        a = np.array(nbs)
+        a = a[a[:, -1].argsort()]  # sort by time
+        _, idx = np.unique(a[:, [0]], return_index=True, axis=0)
+        nbs_unique = a[np.sort(idx)][:, 0]
+        for i, u in enumerate(nbs_unique):
+            ports_dict[(u, v)] = i
+    for i, e in enumerate(edge_index.T):
+        ports[i] = ports_dict.get(tuple(e.numpy()), 0)
+    return ports
+
+def add_ports(data):
+    device = data.edge_attr.device
+    adj_list_in, adj_list_out = to_adj_nodes_with_times(data)
+    in_ports = ports(data.edge_index, adj_list_in)
+    out_ports = ports(data.edge_index.flip(0), adj_list_out)
+    in_ports = in_ports.to(device)
+    out_ports = out_ports.to(device)
+    data.edge_attr = torch.cat([data.edge_attr, in_ports, out_ports], dim=1)
+    return data
