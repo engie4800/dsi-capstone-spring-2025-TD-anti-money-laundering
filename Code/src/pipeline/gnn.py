@@ -7,6 +7,7 @@ from sklearn.preprocessing import StandardScaler
 from torch_geometric.explain import GNNExplainer
 from torch_geometric.data import Data
 from torch_geometric.loader import LinkNeighborLoader
+from torch_geometric.utils import degree
 from tqdm import tqdm
 
 from explain import GNNEdgeExplainer
@@ -42,7 +43,7 @@ class GNNModelPipeline(BaseModelPipeline):
         # Prereq: make edge_id first col, exclude some standard feats (if not already excluded)
         exclude_cols = {"edge_id", "from_bank", "to_bank", "from_account_idx", "to_account_idx"}
         cols = self.X_cols if edge_features is None else edge_features
-        self.edge_features = ['edge_id'] + [col for col in cols if col not in exclude_cols]
+        self.edge_features = ["edge_id"] + [col for col in cols if col not in exclude_cols]
 
         # Nodes
         tr_x = torch.tensor(self.train_nodes.drop(columns="node_id").values, dtype=torch.float)
@@ -206,9 +207,17 @@ class GNNModelPipeline(BaseModelPipeline):
         # Model setup
         num_edge_features = self.train_data.edge_attr.shape[1]-1  # num edge feats - edge_id
         num_node_features = self.train_data.x.shape[1]
+        # Some model flavors have custom inputs
+        if gnn_flavor == "PNA":
+            # <https://github.com/IBM/Multi-GNN/blob/252b0252afca109d1d216c411c59ff70753b25fc/training.py#L151>
+            d = degree(self.edge_index[1], dtype=torch.long)
+            deg = torch.bincount(d, minlength=1)
+        else:
+            deg = None
         self.model = GNN(
             n_node_feats=num_node_features,
             n_edge_feats=num_edge_features,
+            deg=deg,
             gnn_flavor=gnn_flavor,
         ).to(self.device)
         self.trainer = GNNTrainer(self.model, self)
