@@ -33,7 +33,7 @@ jobs:
           pip install -f https://download.pytorch.org/whl/torch_stable.html \
             torch==2.2.1+cpu \
             torchvision==0.18.1+cpu \
-            torchaudio==2.5.1+cpu
+            torchaudio==2.3.1+cpu
           pip install --extra-index-url https://data.pyg.org/whl/torch-2.5.1+cpu.html \
             torch-scatter==2.1.2 \
             torch-sparse==0.6.18 \
