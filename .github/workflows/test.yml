@@ -1,0 +1,38 @@
+---
+name: Run Pipeline Source Code Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        # Python3.11 seems to be required for PyG.
+        # That is also what Google Colab uses at the time of this writing
+        python-version: ["3.11"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          cd Code
+          python -m pip install --upgrade pip
+          pip install .
+          pip install torch-scatter torch-sparse pyg-lib torch-geometric -f https://data.pyg.org/whl/torch-2.5.1+cu118.html
+
+      - name: Run tests
+        run: |
+          cd Code
+          python -m unittest discover -s src/tests

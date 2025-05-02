@@ -156,7 +156,7 @@ class BaseModelPipeline:
             )
         self.preprocessed["checked_for_null_values"] = True
 
-    def extract_currency_features(self) -> None:
+    def extract_currency_features(self, get_base_amlworld_data=False) -> None:
         """
         Extract all currency-related features
 
@@ -168,7 +168,10 @@ class BaseModelPipeline:
         Checker.currency_columns_required(self)
 
         self.df = add_currency_exchange(self.df)
-        usd_conversion = get_usd_conversion(self.dataset_path)
+        usd_conversion = get_usd_conversion(
+            self.dataset_path,
+            get_base_amlworld_data=get_base_amlworld_data,
+        )
         self.df = add_sent_amount_usd(self.df, usd_conversion)
 
         self.engineered_features += ['sent_amount_usd','log_currency_exchange']
