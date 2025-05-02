@@ -293,4 +293,5 @@ def create_subgraph(
     logging.info(f"Estimated output file size: {estimated_size_mb:.2f} MB")
 
     if save_subgraph:
+        breakpoint()
         final_subset_df.to_csv((os.path.join(p.dataset_path, file_name)), index=False)
