@@ -295,6 +295,6 @@ def create_subgraph(
     if save_subgraph:
         final_subset_df.to_csv(
             # Need to remove the current dataset from `dataset_path`
-            os.path.join(p.dataset_path.split("/")[0:-1], file_name),
+            os.path.join("/".join(p.dataset_path.split("/")[0:-1]), file_name),
             index=False,
         )
