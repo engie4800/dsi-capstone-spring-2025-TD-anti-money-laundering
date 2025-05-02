@@ -32,9 +32,11 @@ dependencies = [
     "networkx",
     "scikit-learn",
     "scikit-optimize",
-    "torch",
+    "torch==2.5.1",
     "torch_geometric",
-    "torchvision",
+    # "torchaudio",
+    "torchmetrics",
+    # "torchvision",
     "xgboost",
 
     # Data visualization
@@ -47,7 +49,14 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["src"]
+packages = [
+    "explain",
+    "helpers",
+    "model",
+    "pipeline",
+    "plotting",
+    "tests",
+]
 
 [tool.setuptools.package-dir]
-mypackage = "Code/src"
+"" = "src"

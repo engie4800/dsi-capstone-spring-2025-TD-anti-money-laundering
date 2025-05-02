@@ -2,7 +2,7 @@
 
 ## Course overview
 
-This course provides a unique opportunity for students in the MS in Data Science program to apply their knowledge of the foundations, theory and methods of data science to address data driven problems in industry, research, government and the non-profit sector. The course activities focus on a semester-long project sponsored by an affiliate company or a Columbia faculty member. The project synthesizes the statistical, computational, engineering and social challenges involved in solving complex real-world problems. The course has a well developed Ethics component supported by Dr. Savannah Thais. 
+This course provides a unique opportunity for students in the MS in Data Science program to apply their knowledge of the foundations, theory and methods of data science to address data driven problems in industry, research, government and the non-profit sector. The course activities focus on a semester-long project sponsored by an affiliate company or a Columbia faculty member. The project synthesizes the statistical, computational, engineering and social challenges involved in solving complex real-world problems. The course has a well developed Ethics component supported by Dr. Savannah Thais.
 
 ## Team Structure
 
@@ -14,6 +14,7 @@ This course provides a unique opportunity for students in the MS in Data Science
 6. Tanya Jia Xuan Lim, tjl2150
 
 ## Project Directory
+
 ```bash
 ├── Code/
 │   ├── notebooks/
@@ -50,4 +51,3 @@ For more details, refer to the README files in each respective folder.
 3. Weekly Check-ins (progress questions)
 
 NOTE: Completion of weekly check in progress logs and showing up for the 15 minute check ins will count towards your participation grade.
-   
