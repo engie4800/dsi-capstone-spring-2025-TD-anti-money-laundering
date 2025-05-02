@@ -34,9 +34,9 @@ dependencies = [
     "scikit-optimize",
     "torch==2.5.1",
     "torch_geometric",
-    "torchaudio",
+    # "torchaudio",
     "torchmetrics",
-    "torchvision",
+    # "torchvision",
     "xgboost",
 
     # Data visualization

@@ -30,12 +30,17 @@ jobs:
           cd Code
           python -m pip install --upgrade pip
           pip install .
-          pip install torch-scatter torch-sparse pyg-lib torch-geometric -f https://data.pyg.org/whl/torch-2.5.1+cu118.html
+          pip install torch==2.5.1+cpu \
+            torchvision==0.20.1+cpu \
+            torchaudio==2.5.1+cpu \
+            -f https://download.pytorch.org/whl/torch_stable.html
+          pip install torch-geometric==2.6.1
+          pip install torch-scatter==2.1.2 \
+            torch-sparse==0.6.18 \
+            pyg-lib==0.4.0 \
+            --extra-index-url https://data.pyg.org/whl/torch-2.5.1+cpu.html
 
       - name: Run tests
         run: |
           cd Code
-          echo ""
-          pip freeze
-          echo ""
           python -m unittest discover -s src/tests
