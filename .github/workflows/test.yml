@@ -30,15 +30,15 @@ jobs:
           cd Code
           python -m pip install --upgrade pip
           pip install .
-          pip install torch==2.5.1+cpu \
+          pip install -f https://download.pytorch.org/whl/torch_stable.html \
+            torch==2.5.1+cpu \
             torchvision==0.20.1+cpu \
-            torchaudio==2.5.1+cpu \
-            -f https://download.pytorch.org/whl/torch_stable.html
-          pip install torch-geometric==2.6.1
-          pip install torch-scatter==2.1.2 \
+            torchaudio==2.5.1+cpu
+          pip install --extra-index-url https://data.pyg.org/whl/torch-2.5.1+cpu.html \
+            torch-scatter==2.1.2 \
             torch-sparse==0.6.18 \
-            pyg-lib==0.4.0 \
-            --extra-index-url https://data.pyg.org/whl/torch-2.5.1+cpu.html
+            pyg-lib==0.4.0
+          pip install torch-geometric==2.6.1
 
       - name: Run tests
         run: |
