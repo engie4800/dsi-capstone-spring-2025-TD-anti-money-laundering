@@ -255,13 +255,6 @@ class GNNModelPipeline(BaseModelPipeline):
         # self.edge_feature_labels = self.df[self.edge_features].drop(columns="edge_id").columns
 
         # Model setup
-        
-        if isinstance(self.train_data, HeteroData):
-            num_edge_features = self.train_data['node','to','node'].edge_attr.shape[1]-1  # num edge feats - edge_id
-            num_node_features = self.train_data['node','to','node'].x.shape[1]
-        else:
-            num_edge_features = self.train_data.edge_attr.shape[1]-1  # num edge feats - edge_id
-            num_node_features = self.train_data.x.shape[1]
         # Some model flavors have custom inputs
         if gnn_flavor == "PNA":
             # <https://github.com/IBM/Multi-GNN/blob/252b0252afca109d1d216c411c59ff70753b25fc/training.py#L151>
@@ -273,19 +266,20 @@ class GNNModelPipeline(BaseModelPipeline):
         if isinstance(self.train_data, HeteroData):
             num_edge_features = self.train_data['node','to','node'].edge_attr.shape[1]-1  # num edge feats - edge_id
             num_node_features = self.train_data['node'].x.shape[1]
-            self.model = GNN(n_node_feats=num_node_features, n_edge_feats=num_edge_features)
+            self.model = GNN(n_node_feats=num_node_features, 
+                             n_edge_feats=num_edge_features,
+                             deg=deg,
+                             gnn_flavor=gnn_flavor
+                             )
             self.model = to_hetero(self.model, self.test_data.metadata(), aggr='mean').to(self.device)
         else:
             num_edge_features = self.train_data.edge_attr.shape[1]-1  # num edge feats - edge_id
             num_node_features = self.train_data.x.shape[1]
-            self.model = GNN(n_node_feats=num_node_features, n_edge_feats=num_edge_features).to(self.device)
-        self.trainer = GNNTrainer(self.model, self)
-        self.model = GNN(
-            n_node_feats=num_node_features,
-            n_edge_feats=num_edge_features,
-            deg=deg,
-            gnn_flavor=gnn_flavor,
-        ).to(self.device)
+            self.model = GNN(n_node_feats=num_node_features, 
+                             n_edge_feats=num_edge_features,
+                             deg=deg,
+                             gnn_flavor=gnn_flavor
+                             ).to(self.device)
         self.trainer = GNNTrainer(self.model, model_save_path, self)
 
     def initialize_explainer(self, epochs: int=200) -> None:
