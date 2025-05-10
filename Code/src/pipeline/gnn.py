@@ -280,7 +280,7 @@ class GNNModelPipeline(BaseModelPipeline):
                              deg=deg,
                              gnn_flavor=gnn_flavor
                              ).to(self.device)
-        self.trainer = GNNTrainer(self.model, model_save_path, self)
+        self.trainer = GNNTrainer(self.model, self, model_save_path)
 
     def initialize_explainer(self, epochs: int=200) -> None:
         """
