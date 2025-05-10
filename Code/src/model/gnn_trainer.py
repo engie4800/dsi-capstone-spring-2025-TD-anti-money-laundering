@@ -169,7 +169,7 @@ class GNNTrainer:
 
             # Remove edge_id as attribute before running model
             batch = batch.to(self.device)
-            batch['node', 'to', 'node'] = batch['node', 'to', 'node'].edge_attr[:, 1:].clone()
+            batch['node', 'to', 'node'].edge_attr = batch['node', 'to', 'node'].edge_attr[:, 1:].clone()
             batch['node', 'rev_to', 'node'].edge_attr = batch['node', 'rev_to', 'node'].edge_attr[:, 1:].clone()
             
             # Forward pass
@@ -343,7 +343,7 @@ class GNNTrainer:
 
                 # Remove edge_id as attribute before running model
                 batch = batch.to(self.device)
-                batch['node', 'to', 'node'] = batch['node', 'to', 'node'].edge_attr[:, 1:].clone()
+                batch['node', 'to', 'node'].edge_attr = batch['node', 'to', 'node'].edge_attr[:, 1:].clone()
                 batch['node', 'rev_to', 'node'].edge_attr = batch['node', 'rev_to', 'node'].edge_attr[:, 1:].clone()
                 
                 # Forward pass

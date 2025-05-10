@@ -242,15 +242,20 @@ class GNNModelPipeline(BaseModelPipeline):
         # does assume that column ordering between data frames and
         # tensors is preserved, and it removes node and edge id
         # TODO: ran into issue with this line bc node_id has already been dropped
-        if 'node_id' in self.nodes.columns:
-            self.node_feature_labels = self.nodes.drop(columns="node_id").columns
-        else:
-            self.node_feature_labels = self.nodes.columns
-        self.edge_feature_labels = self.df[self.edge_features].drop(columns="edge_id").columns
+        # if 'node_id' in self.nodes.columns:
+        #     self.node_feature_labels = self.nodes.drop(columns="node_id").columns
+        # else:
+        #     self.node_feature_labels = self.nodes.columns
+        # self.edge_feature_labels = self.df[self.edge_features].drop(columns="edge_id").columns
 
         # Model setup
-        num_edge_features = self.train_data.edge_attr.shape[1]-1  # num edge feats - edge_id
-        num_node_features = self.train_data.x.shape[1]
+        
+        if isinstance(self.train_data, HeteroData):
+            num_edge_features = self.train_data['node','to','node'].edge_attr.shape[1]-1  # num edge feats - edge_id
+            num_node_features = self.train_data['node','to','node'].x.shape[1]
+        else:
+            num_edge_features = self.train_data.edge_attr.shape[1]-1  # num edge feats - edge_id
+            num_node_features = self.train_data.x.shape[1]
         self.model = GINe(n_node_feats=num_node_features, n_edge_feats=num_edge_features).to(self.device)
         self.trainer = GNNTrainer(self.model, self)
 
