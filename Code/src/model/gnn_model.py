@@ -6,7 +6,7 @@ from torch_geometric.nn import GINEConv, PNAConv
 
 class GNN(nn.Module):
 
-   def __init__(
+    def __init__(
         self,
         n_node_feats,
         n_edge_feats,
@@ -19,7 +19,7 @@ class GNN(nn.Module):
         final_dropout=0.10527690625126304,
         deg=None,
         gnn_flavor="GINe",
-    ):
+        ):
         if gnn_flavor not in ["GINe", "PNA"]:
             raise ValueError(
                 "Unsupported GNN flavor"
@@ -92,7 +92,7 @@ class GNN(nn.Module):
         x: torch.Tensor,
         edge_index: torch.Tensor,
         edge_attr: torch.Tensor,
-    ) -> torch.Tensor:
+        ) -> torch.Tensor:
         src, dst = edge_index
 
         x = self.node_emb(x)
