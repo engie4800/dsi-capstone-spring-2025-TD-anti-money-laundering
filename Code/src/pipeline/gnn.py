@@ -8,6 +8,7 @@ from torch_geometric.explain import GNNExplainer
 from torch_geometric.data import Data, HeteroData
 from torch_geometric.loader import LinkNeighborLoader
 from torch_geometric.utils import degree
+from torch_geometric.nn import to_hetero
 from tqdm import tqdm
 
 from explain import GNNEdgeExplainer
@@ -268,6 +269,17 @@ class GNNModelPipeline(BaseModelPipeline):
             deg = torch.bincount(d, minlength=1)
         else:
             deg = None
+        
+        if isinstance(self.train_data, HeteroData):
+            num_edge_features = self.train_data['node','to','node'].edge_attr.shape[1]-1  # num edge feats - edge_id
+            num_node_features = self.train_data['node'].x.shape[1]
+            self.model = GNN(n_node_feats=num_node_features, n_edge_feats=num_edge_features)
+            self.model = to_hetero(self.model, self.test_data.metadata(), aggr='mean').to(self.device)
+        else:
+            num_edge_features = self.train_data.edge_attr.shape[1]-1  # num edge feats - edge_id
+            num_node_features = self.train_data.x.shape[1]
+            self.model = GNN(n_node_feats=num_node_features, n_edge_feats=num_edge_features).to(self.device)
+        self.trainer = GNNTrainer(self.model, self)
         self.model = GNN(
             n_node_feats=num_node_features,
             n_edge_feats=num_edge_features,
