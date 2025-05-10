@@ -300,7 +300,7 @@ class GNNTrainer:
             if epoch >= min_epochs and (val_metric > best_val_metric):
                 best_val_metric = val_metric
                 patience_counter = 0
-                torch.save(self.model.state_dict(), self.model_save_path.format(epoch=epoch+1))
+                torch.save(self.model.state_dict(), f"{self.model_save_path}/model_{epoch+1}.pt")
                 print("✅ New best model saved.")
             elif epoch >= min_epochs and self.patience is not None:
                 patience_counter += 1
@@ -405,7 +405,7 @@ class GNNTrainer:
             if epoch >= min_epochs and (val_metric > best_val_metric):
                 best_val_metric = val_metric
                 patience_counter = 0
-                torch.save(self.model.state_dict(), self.model_save_path.format(epoch=epoch+1))
+                torch.save(self.model.state_dict(), f"{self.model_save_path}/model_{epoch+1}.pt")
                 print("✅ New best model saved.")
             elif epoch >= min_epochs and self.patience is not None:
                 patience_counter += 1
