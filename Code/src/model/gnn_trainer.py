@@ -177,7 +177,7 @@ class GNNTrainer:
             logits = logits['node', 'to', 'node'].view(-1)[mask]
             target = batch['node', 'to', 'node'].y[mask]
             prob = torch.sigmoid(logits)
-            pred = (probs > self.threshold).long()
+            pred = (prob > self.threshold).long()
 
             total_loss += loss_fn(logits, target.float()).item() * logits.size(0)
             
