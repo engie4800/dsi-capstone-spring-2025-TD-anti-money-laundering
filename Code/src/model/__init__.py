@@ -1,8 +1,8 @@
-from .gine_model import GINe
+from .gnn_model import GNN
 from .gnn_trainer import GNNTrainer
 
 
 __all__ = [
-    "GINe",
+    "GNN",
     "GNNTrainer",
 ]

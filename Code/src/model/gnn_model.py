@@ -1,16 +1,41 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GINEConv
+from torch_geometric.nn import GINEConv, PNAConv
 
 
-class GINe(nn.Module):
+class GNN(nn.Module):
 
-    def __init__(self, n_node_feats, n_edge_feats, num_gnn_layers=2, n_classes=1,
-                 n_hidden=100, edge_updates=True, residual=True,
-                 dropout=0.0, final_dropout=0.10527690625126304):
+   def __init__(
+        self,
+        n_node_feats,
+        n_edge_feats,
+        num_gnn_layers=2,
+        n_classes=1,
+        n_hidden=100,
+        edge_updates=True,
+        residual=True,
+        dropout=0.0,
+        final_dropout=0.10527690625126304,
+        deg=None,
+        gnn_flavor="GINe",
+    ):
+        if gnn_flavor not in ["GINe", "PNA"]:
+            raise ValueError(
+                "Unsupported GNN flavor"
+            )
+
         super().__init__()
-        self.n_hidden = n_hidden
+
+        # Flavor-specific setup
+        if gnn_flavor == "GINe":
+            self.n_hidden = n_hidden
+        elif gnn_flavor == "PNA":
+            n_hidden = int((n_hidden // 5) * 5)
+            self.n_hidden = n_hidden
+            aggregators = ["mean", "min", "max", "std"]
+            scalers = ["identity", "amplification", "attenuation"]
+
         self.num_gnn_layers = num_gnn_layers
         self.edge_updates = edge_updates
         self.final_dropout = final_dropout
@@ -23,11 +48,26 @@ class GINe(nn.Module):
         self.batch_norms = nn.ModuleList()
 
         for _ in range(self.num_gnn_layers):
-            conv = GINEConv(nn.Sequential(
-                nn.Linear(self.n_hidden, self.n_hidden),
-                nn.ReLU(),
-                nn.Linear(self.n_hidden, self.n_hidden)
-            ), edge_dim=self.n_hidden)
+            # Flavor-specific convolution
+            if gnn_flavor == "GINe":
+                conv = GINEConv(nn.Sequential(
+                    nn.Linear(self.n_hidden, self.n_hidden),
+                    nn.ReLU(),
+                    nn.Linear(self.n_hidden, self.n_hidden)
+                ), edge_dim=self.n_hidden)
+            elif gnn_flavor == "PNA":
+                conv = PNAConv(
+                    in_channels=n_hidden,
+                    out_channels=n_hidden,
+                    aggregators=aggregators,
+                    scalers=scalers,
+                    deg=deg,
+                    edge_dim=n_hidden,
+                    towers=5,
+                    pre_layers=1,
+                    post_layers=1,
+                    divide_input=False,
+                )
 
             if self.edge_updates: self.emlps.append(nn.Sequential(
                 nn.Linear(3 * self.n_hidden, self.n_hidden),
