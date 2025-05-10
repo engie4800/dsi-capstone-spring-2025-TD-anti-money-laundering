@@ -18,8 +18,7 @@ class GNNTrainer:
     """Trainer class for GINe-based Graph Neural Network using PyTorch Geometric and torchmetrics.
     Handles training, evaluation, early stopping, and metric logging.
     """
-    def __init__(self, model, pl, model_save_path:str, threshold: float=0.5,
-                 device ="cuda" if torch.cuda.is_available() else "cpu", 
+    def __init__(self, model, pl, model_save_path:str, threshold: float=0.5, 
                  pos_weight_val:float=12.0, lr:float=0.005):
         """Initializes the trainer with model, data loaders, and training parameters.
 
@@ -37,6 +36,7 @@ class GNNTrainer:
         self.threshold = pl.threshold
         self.epochs = pl.epochs
         self.patience = pl.patience
+        self.model_save_path = model_save_path
         
         # Data
         self.df = pl.df
