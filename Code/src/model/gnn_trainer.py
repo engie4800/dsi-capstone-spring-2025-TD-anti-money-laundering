@@ -174,7 +174,7 @@ class GNNTrainer:
             
             # Forward pass
             logits = self.model(batch.x_dict, batch.edge_index_dict, batch.edge_attr_dict)
-            logits = logits(['node', 'to', 'node']).view(-1)[mask]
+            logits = logits['node', 'to', 'node'].view(-1)[mask]
             target = batch['node', 'to', 'node'].y[mask]
             prob = torch.sigmoid(logits)
             pred = (probs > self.threshold).long()
@@ -346,7 +346,7 @@ class GNNTrainer:
                 
                 # Forward pass
                 logits = self.model(batch.x_dict, batch.edge_index_dict, batch.edge_attr_dict)
-                logits = logits(['node', 'to', 'node']).view(-1)[mask]
+                logits = logits['node', 'to', 'node'].view(-1)[mask]
                 target = batch['node', 'to', 'node'].y[mask]
                 probs = torch.sigmoid(logits)
                 preds = (probs > self.threshold).long()
