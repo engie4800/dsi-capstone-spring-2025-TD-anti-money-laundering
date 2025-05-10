@@ -229,6 +229,7 @@ class GNNModelPipeline(BaseModelPipeline):
         
     def initialize_training(
         self,
+        model_save_path:str,
         threshold: float=0.5,
         epochs: int=50,
         patience: int=10,
@@ -273,7 +274,7 @@ class GNNModelPipeline(BaseModelPipeline):
             deg=deg,
             gnn_flavor=gnn_flavor,
         ).to(self.device)
-        self.trainer = GNNTrainer(self.model, self)
+        self.trainer = GNNTrainer(self.model, model_save_path, self)
 
     def initialize_explainer(self, epochs: int=200) -> None:
         """

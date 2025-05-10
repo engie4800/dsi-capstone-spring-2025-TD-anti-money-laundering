@@ -18,9 +18,9 @@ class GNNTrainer:
     """Trainer class for GINe-based Graph Neural Network using PyTorch Geometric and torchmetrics.
     Handles training, evaluation, early stopping, and metric logging.
     """
-    def __init__(self, model, pl, threshold: float=0.5,
+    def __init__(self, model, pl, model_save_path:str, threshold: float=0.5,
                  device ="cuda" if torch.cuda.is_available() else "cpu", 
-                 pos_weight_val:float=6.0, lr:float=0.005):
+                 pos_weight_val:float=12.0, lr:float=0.005):
         """Initializes the trainer with model, data loaders, and training parameters.
 
         Args:
@@ -210,8 +210,6 @@ class GNNTrainer:
             patience (int): Early stopping patience after min_epochs is reached.
         """
 
-        best_val_f1 = 0
-        best_pr_auc = 0
         best_val_metric = 0 
         patience_counter = 0  # for early stopping
         min_epochs = 15       # don't allow early model saving
@@ -295,14 +293,14 @@ class GNNTrainer:
             logging.info("-" * 80)
 
             # Modify learning rate based on chosen metric
-            val_metric = 0.5 * val_f1 + 0.5 * val_pr_auc
+            val_metric = val_pr_auc
             self.scheduler.step(val_metric)
 
             # Save best model
             if epoch >= min_epochs and (val_metric > best_val_metric):
                 best_val_metric = val_metric
                 patience_counter = 0
-                torch.save(self.model.state_dict(), f"best_model_epoch{epoch+1}.pt")
+                torch.save(self.model.state_dict(), self.model_save_path.format(epoch=epoch+1))
                 print("✅ New best model saved.")
             elif epoch >= min_epochs and self.patience is not None:
                 patience_counter += 1
@@ -400,14 +398,14 @@ class GNNTrainer:
             logging.info("-" * 80)
 
             # Modify learning rate based on chosen metric
-            val_metric = 0.5 * val_f1 + 0.5 * val_pr_auc
+            val_metric = val_pr_auc
             self.scheduler.step(val_metric)
 
             # Save best model
             if epoch >= min_epochs and (val_metric > best_val_metric):
                 best_val_metric = val_metric
                 patience_counter = 0
-                torch.save(self.model.state_dict(), f"best_model_epoch{epoch+1}.pt")
+                torch.save(self.model.state_dict(), self.model_save_path.format(epoch=epoch+1))
                 print("✅ New best model saved.")
             elif epoch >= min_epochs and self.patience is not None:
                 patience_counter += 1
