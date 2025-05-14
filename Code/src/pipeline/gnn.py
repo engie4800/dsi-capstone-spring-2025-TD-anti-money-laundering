@@ -235,6 +235,7 @@ class GNNModelPipeline(BaseModelPipeline):
         epochs: int=50,
         patience: int=10,
         gnn_flavor: str="GINe",
+        num_gnn_layers: int=2
     ) -> None:
         """Setup the model pipeline for training: metrics, model,
         optimizer, scheduler, and criterion
@@ -268,6 +269,7 @@ class GNNModelPipeline(BaseModelPipeline):
             num_node_features = self.train_data['node'].x.shape[1]
             self.model = GNN(n_node_feats=num_node_features, 
                              n_edge_feats=num_edge_features,
+                             num_gnn_layers=num_gnn_layers,
                              deg=deg,
                              gnn_flavor=gnn_flavor
                              )
@@ -277,6 +279,7 @@ class GNNModelPipeline(BaseModelPipeline):
             num_node_features = self.train_data.x.shape[1]
             self.model = GNN(n_node_feats=num_node_features, 
                              n_edge_feats=num_edge_features,
+                             num_gnn_layers=num_gnn_layers,
                              deg=deg,
                              gnn_flavor=gnn_flavor
                              ).to(self.device)
