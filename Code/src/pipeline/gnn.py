@@ -1,3 +1,4 @@
+import os
 import logging
 from typing import TYPE_CHECKING
 
@@ -309,6 +310,102 @@ class GNNModelPipeline(BaseModelPipeline):
                 return_type="raw",                  # Binary classification + logits = raw
             ),
         )
+    
+    def save_loaders(self, file_path: str, name: str="data_bundle") -> None:
+        """Saves all relevant graph and training data to a single file.
+
+        Args:
+            file_path (str): Directory to save the file.
+            name (str): Base name for the saved file. Defaults to "data_bundle".
+        """
+        os.makedirs(file_path, exist_ok=True)
+        bundle = {
+            "df": self.df,
+            "train_data": self.train_data,
+            "val_data": self.val_data,
+            "test_data": self.test_data,
+            "split_indices": {
+                "train": self.train_indices,
+                "val": self.val_indices,
+                "test": self.test_indices,
+            }
+        }
+        save_path = os.path.join(file_path, f"{name}.pt")
+        torch.save(bundle, save_path)
+        logging.info(f"Data saved to {save_path}")
+        
+    def initialize_from_saved(
+        self, 
+        file_path: str,  
+        model_save_path: str,
+        name: str="data_bundle",
+        num_neighbors=[100,100],
+        batch_size=8192,
+        model_load_path: str=None,
+        threshold: float=0.5,
+        epochs: int=50,
+        patience: int=10,
+        gnn_flavor: str="GINe",
+        num_gnn_layers: int=2
+    )->None:
+        """
+        Loads saved training and graph data and reinitializes the model pipeline.
+
+        Args:
+            file_path (str): Directory where the saved file is stored.
+            name (str): Base name of the saved file.
+            model_save_path (str): Path to save future models.
+            model_load_path (str): Path to a previously trained model to load.
+            Other args: Model and training configuration parameters.
+        """
+        
+        # Load saved data
+        load_path = os.path.join(file_path, f"{name}.pt")
+        bundle = torch.load(load_path)
+        
+        # Restore
+        df = bundle["df"]
+        train_data = bundle["train_data"]
+        val_data = bundle["val_data"]
+        test_data = bundle["test_data"]
+        train_indices = bundle["split_indices"]["train"]
+        val_indices = bundle["split_indices"]["val"]
+        test_indices = bundle["split_indices"]["test"] 
+
+        # Populate necessary attributes
+        self.df = df
+        self.train_data = train_data
+        self.val_data = val_data
+        self.test_data = test_data
+        self.train_indices = train_indices
+        self.val_indices = val_indices
+        self.test_indices = test_indices
+
+        for item in self.preprocessed.keys():
+            self.preprocessed[item] = True
+
+        # Get data loaders
+        self.get_data_loaders(
+            num_neighbors=num_neighbors, 
+            batch_size=batch_size
+        )
+        
+        self.initialize_training(
+            model_save_path=model_save_path, 
+            threshold=threshold, epochs=epochs, 
+            patience=patience, 
+            gnn_flavor=gnn_flavor, 
+            num_gnn_layers=num_gnn_layers
+        )
+        
+        if model_load_path is not None:
+            self.model.load_state_dict(torch.load(model_load_path, map_location=self.device))
+            print(f"Loaded model weights from {model_load_path}")
+        
+        logging.info("Model initialized.")
+        logging.info("Caution: This pipeline was initialized from a saved state without re-running \n"
+              "full preprocessing checks. Ensure that the data and model configuration match \n"
+              "the original setup to avoid inconsistencies or errors during training and evaluation.")
 
     def explain(self, target_edge: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Provides an explanation for the given `target_edge` using
