@@ -384,6 +384,8 @@ class GNNModelPipeline(BaseModelPipeline):
         self.train_indices = train_indices
         self.val_indices = val_indices
         self.test_indices = test_indices
+        self.edge_index = torch.LongTensor(self.df[["from_account_idx", "to_account_idx"]].to_numpy().T)
+        self.y = torch.LongTensor(self.df["is_laundering"].to_numpy())
 
         for item in self.preprocessed.keys():
             self.preprocessed[item] = True
