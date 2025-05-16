@@ -54,7 +54,7 @@ class GNNTrainer:
             self.optimizer,
             mode="max",            # maximize the metric (e.g., F1, PR AUC)
             factor=0.5,            # reduce LR by half when triggered
-            patience=400,            # wait 50 epochs without improvement
+            patience=50,            # wait 50 epochs without improvement
             verbose=True
         )
         
@@ -293,7 +293,7 @@ class GNNTrainer:
             logging.info("-" * 80)
 
             # Modify learning rate based on chosen metric
-            val_metric = val_pr_auc
+            val_metric = 0.5*val_pr_auc + 0.5*val_f1
             self.scheduler.step(val_metric)
 
             # Save best model
@@ -398,7 +398,7 @@ class GNNTrainer:
             logging.info("-" * 80)
 
             # Modify learning rate based on chosen metric
-            val_metric = val_pr_auc
+            val_metric = 0.5*val_pr_auc + 0.5*val_f1
             self.scheduler.step(val_metric)
 
             # Save best model
