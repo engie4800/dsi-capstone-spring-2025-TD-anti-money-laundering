@@ -236,7 +236,8 @@ class GNNModelPipeline(BaseModelPipeline):
         epochs: int=50,
         patience: int=10,
         gnn_flavor: str="GINe",
-        num_gnn_layers: int=2
+        num_gnn_layers: int=2,
+        edge_updates: bool=True
     ) -> None:
         """Setup the model pipeline for training: metrics, model,
         optimizer, scheduler, and criterion
@@ -271,6 +272,7 @@ class GNNModelPipeline(BaseModelPipeline):
             self.model = GNN(n_node_feats=num_node_features, 
                              n_edge_feats=num_edge_features,
                              num_gnn_layers=num_gnn_layers,
+                             edge_updates=edge_updates,
                              deg=deg,
                              gnn_flavor=gnn_flavor
                              )
@@ -281,6 +283,7 @@ class GNNModelPipeline(BaseModelPipeline):
             self.model = GNN(n_node_feats=num_node_features, 
                              n_edge_feats=num_edge_features,
                              num_gnn_layers=num_gnn_layers,
+                             edge_updates=edge_updates,
                              deg=deg,
                              gnn_flavor=gnn_flavor
                              ).to(self.device)
@@ -345,6 +348,7 @@ class GNNModelPipeline(BaseModelPipeline):
         threshold: float=0.5,
         epochs: int=50,
         patience: int=10,
+        edge_updates: bool=True,
         gnn_flavor: str="GINe",
         num_gnn_layers: int=2
     )->None:
@@ -394,6 +398,7 @@ class GNNModelPipeline(BaseModelPipeline):
             model_save_path=model_save_path, 
             threshold=threshold, epochs=epochs, 
             patience=patience, 
+            edge_updates=edge_updates,
             gnn_flavor=gnn_flavor, 
             num_gnn_layers=num_gnn_layers
         )

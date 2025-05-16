@@ -14,8 +14,6 @@ class GNN(nn.Module):
         n_classes=1,
         n_hidden=100,
         edge_updates=True,
-        residual=True,
-        dropout=0.0,
         final_dropout=0.10527690625126304,
         deg=None,
         gnn_flavor="GINe",
