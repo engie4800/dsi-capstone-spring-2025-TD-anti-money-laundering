@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import torch
 import torch.nn as nn
 from torch.optim import Adam
+from torch_geometric.data import HeteroData
 from torchmetrics.classification import (
     BinaryAccuracy,
     BinaryPrecision,
@@ -37,6 +38,7 @@ class GNNTrainer:
         self.epochs = pl.epochs
         self.patience = pl.patience
         self.model_save_path = model_save_path
+        self.hetero = True if isinstance(pl.train_data, HeteroData) else False
         
         # Data
         self.df = pl.df
@@ -68,7 +70,7 @@ class GNNTrainer:
         )
         
     @torch.no_grad()
-    def evaluate(self, loader, inds):
+    def evaluate_homo(self, loader, inds):
         """Evaluate model performance on a given data loader and indices.
 
         Args:
@@ -201,7 +203,7 @@ class GNNTrainer:
             self.metrics.pr_auc(probs, targets)
         )
 
-    def train(self):
+    def train_homo(self):
         """Main training loop for the model.
 
         Args:
@@ -271,13 +273,13 @@ class GNNTrainer:
             train_pr_auc = self.metrics.pr_auc(train_probs, train_targets)
 
             # Validation
-            val_loss, val_acc, val_prec, val_rec, val_f1, val_pr_auc = self.evaluate(
+            val_loss, val_acc, val_prec, val_rec, val_f1, val_pr_auc = self.evaluate_homo(
                 self.val_loader,
                 self.val_indices
             )
 
             # Test
-            test_loss, test_acc, test_prec, test_rec, test_f1, test_pr_auc = self.evaluate(
+            test_loss, test_acc, test_prec, test_rec, test_f1, test_pr_auc = self.evaluate_homo(
                 self.test_loader,
                 self.test_indices,
             )
@@ -310,7 +312,6 @@ class GNNTrainer:
                     break
 
             torch.cuda.empty_cache()
-    
     
     def train_hetero(self):
         best_val_metric = 0 
@@ -416,4 +417,8 @@ class GNNTrainer:
 
             torch.cuda.empty_cache()
             
-
+    def train(self):
+        if self.hetero:
+            self.train_hetero()
+        else:
+            self.train_homo()
