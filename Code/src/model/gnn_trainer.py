@@ -68,7 +68,87 @@ class GNNTrainer:
             f1_score=BinaryF1Score(threshold=threshold).to(self.device),
             pr_auc=BinaryAveragePrecision().to(self.device),
         )
-        
+      
+    @torch.no_grad()
+    def predict_probs_hetero(self, loader, inds):
+        self.model.eval()
+        preds, targets, probs = [], [], []
+
+        for batch in loader:
+            batch_input_ids = batch['node', 'to', 'node'].input_id.detach().cpu()
+            global_seed_inds = inds[batch_input_ids]
+            seed_edge_ids = self.df.loc[global_seed_inds.cpu().numpy(), "edge_id"].values
+            edge_ids_in_batch = batch['node', 'to', 'node'].edge_attr[:, 0].detach().cpu().numpy()
+            mask = torch.isin(torch.tensor(edge_ids_in_batch), torch.tensor(seed_edge_ids)).to(self.device)
+
+            batch = batch.to(self.device)
+            batch['node', 'to', 'node'].edge_attr = batch['node', 'to', 'node'].edge_attr[:, 1:].clone()
+            batch['node', 'rev_to', 'node'].edge_attr = batch['node', 'rev_to', 'node'].edge_attr[:, 1:].clone()
+
+            logits = self.model(batch.x_dict, batch.edge_index_dict, batch.edge_attr_dict)
+            logits = logits['node', 'to', 'node'].view(-1)[mask]
+            target = batch['node', 'to', 'node'].y[mask]
+            prob = torch.sigmoid(logits)
+            pred = (prob > self.threshold).long()
+
+            preds.append(pred.cpu())
+            targets.append(target.cpu())
+            probs.append(prob.cpu())
+
+        return (
+            torch.cat(targets).numpy(),
+            torch.cat(preds).numpy(),
+            torch.cat(probs).numpy(),
+        )
+    
+    @torch.no_grad()
+    def predict_probs_homo(self, loader, inds):
+        """Generate raw predictions and probabilities for a homogeneous GNN model.
+
+        Args:
+            loader: PyG LinkNeighborLoader for the split (train/val/test).
+            inds (torch.Tensor): Global indices to retrieve edge_ids for masking.
+
+        Returns:
+            Tuple of (y_true, y_pred, y_proba) as numpy arrays.
+        """
+        self.model.eval()
+        preds, targets, probs = [], [], []
+
+        for batch in loader:
+            # Identify seed edges for which we compute loss/prediction
+            batch_input_ids = batch.input_id.detach().cpu()
+            global_seed_inds = inds[batch_input_ids]
+            seed_edge_ids = self.df.loc[global_seed_inds.cpu().numpy(), "edge_id"].values
+            edge_ids_in_batch = batch.edge_attr[:, 0].detach().cpu().numpy()
+            mask = torch.isin(torch.tensor(edge_ids_in_batch), torch.tensor(seed_edge_ids)).to(self.device)
+
+            # Move data to device and strip edge_id column
+            batch = batch.to(self.device)
+            batch_edge_attr = batch.edge_attr[:, 1:].clone()
+
+            # Forward pass
+            logits = self.model(batch.x, batch.edge_index, batch_edge_attr).view(-1)[mask]
+            target = batch.y[mask]
+            prob = torch.sigmoid(logits)
+            pred = (prob > self.threshold).long()
+
+            preds.append(pred.cpu())
+            targets.append(target.cpu())
+            probs.append(prob.cpu())
+
+        return (
+            torch.cat(targets).numpy(),
+            torch.cat(preds).numpy(),
+            torch.cat(probs).numpy(),
+        )
+  
+    def predict_probs(self, loader, inds):
+        if self.hetero:
+            return self.predict_probs_hetero(loader, inds)
+        else:
+            return self.predict_prob_homo(loader, inds) 
+       
     @torch.no_grad()
     def evaluate_homo(self, loader, inds):
         """Evaluate model performance on a given data loader and indices.
